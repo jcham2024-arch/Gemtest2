@@ -1,0 +1,205 @@
+{
+  "architecturalReview": {
+    "overallAssessment": "The architectural foundation is robust, secure, and uniquely suited for autonomous enterprise agents. However, several critical operational and agentic-usability gaps exist that must be addressed to guarantee runtime stability, context-budget efficiency for reading LLMs, and enterprise-grade process management.",
+    "soundLogicConfirmed": [
+      "Zero-dependency policy (java.base only) strictly eliminates transitive supply-chain vulnerabilities, breaking-change churn, and third-party CVE exposure.",
+      "Deterministic memory scrubbing of secrets via mutable char buffers and Destroyable/AutoCloseable avoids long-lived heap exposures.",
+      "Out-of-process script execution via direct ProcessBuilder (no shell invocation) defends against command injection and isolates memory/runtime crashes from the host JVM.",
+      "Clear separation of UI via an event-driven observer interface (UiBridge) decouples presentation libraries (JavaFX/CLI) entirely from domain logic."
+    ],
+    "criticalGapsIdentified": [
+      {
+        "gap": "Zombie Subprocess Leakage on Timeout",
+        "impact": "Process.destroyForcibly() only terminates the root parent process. If a Python script spawns subprocesses or a TypeScript engine invokes child worker threads, orphan processes persist indefinitely in memory.",
+        "remediation": "Leverage the JDK ProcessHandle API (Process.toHandle().descendants()) to recursively terminate entire process trees upon timeout."
+      },
+      {
+        "gap": "Unbounded Context Window Growth",
+        "impact": "AgentContext continuously appends ChatMessage objects. In multi-turn sessions, the message history will quickly exceed the model's context window limit (e.g., 8k, 32k, or 128k tokens), causing API rejections.",
+        "remediation": "Introduce a lightweight TokenEstimator and a modular ContextCompactor POJO implementing sliding-window or summary-based message pruning."
+      },
+      {
+        "gap": "Lack of Cancellation and Abort Signaling",
+        "impact": "No standard mechanism exists for a user (via JavaFX) or an automated watchdog to interrupt a hanging HTTP inference stream or a long-running ReAct loop.",
+        "remediation": "Introduce a thread-safe CancellationToken POJO passed through the inference and tool execution layers."
+      },
+      {
+        "gap": "Ephemeral Script Lifecycle Management",
+        "impact": "Agents frequently generate dynamic, one-off scripts. Storing them permanently clutters disk storage, while executing non-persisted scripts requires specialized stdin piping.",
+        "remediation": "Introduce an EphemeralScriptManager POJO that creates cryptographically unique temp files within an isolated directory and guarantees cleanup via AutoCloseable."
+      },
+      {
+        "gap": "Concurrency and Thread Overhead",
+        "impact": "Spawning platform threads for concurrent stream drainage (stdout/stderr) incurs unnecessary OS thread overhead.",
+        "remediation": "Use Java 21 Virtual Threads (Thread.ofVirtual().start()) for stream drainage and asynchronous HTTP handlers, achieving near-zero thread memory overhead."
+      }
+    ]
+  },
+  "contextWindowOptimizationStrategy": {
+    "challenge": "When downstream LLM agents read code to build, extend, or debug modules, bloated classes exhaust the context window and trigger attention degradation.",
+    "principles": [
+      {
+        "principle": "Atomic POJO Granularity",
+        "rule": "Every class must strictly remain under 120 lines of code (LOC). If a class handles multiple concerns, split it into composable micro-POJOs."
+      },
+      {
+        "principle": "High-Density, Standardized Javadoc",
+        "rule": "Use concise, high-signal Javadoc tags (@summary, @threadsafe, @security, @contract) rather than verbose prose. This allows agent tokenizers to parse semantic contracts with minimal tokens."
+      },
+      {
+        "principle": "Java Records for Immutable Domain Data",
+        "rule": "Replace verbose boilerplate classes (getters, equals, hashCode, toString) with Java Records for domain models (ChatMessage, ToolCall, ToolDefinition, InferenceResponse). This cuts code volume by 60-70% while remaining completely standard Java."
+      }
+    ]
+  },
+  "additionalPojosNeeded": [
+    {
+      "className": "CancellationToken",
+      "packageName": "com.leanllm.concurrency",
+      "category": "Concurrency & Control",
+      "purpose": "Thread-safe signaling primitive to abort long-running HTTP streaming or script execution.",
+      "fields": "cancelled (AtomicBoolean), cancelReason (String), listeners (List<Runnable>)",
+      "whyWeNeedIt": "Allows the UI or agent loop to immediately halt inference or cancel a stuck script runner."
+    },
+    {
+      "className": "ProcessTreeTerminator",
+      "packageName": "com.leanllm.scripting",
+      "category": "Scripting Security",
+      "purpose": "Recursively terminates parent and all descendant OS processes using ProcessHandle.",
+      "fields": "gracePeriodMillis (long)",
+      "whyWeNeedIt": "Guarantees zero zombie or orphaned child processes remain alive after timeouts or cancellations."
+    },
+    {
+      "className": "TokenEstimator",
+      "packageName": "com.leanllm.domain",
+      "category": "Context Management",
+      "purpose": "Zero-dependency heuristic character/token calculator (e.g., standard 3.8-4.0 chars/token approximation).",
+      "fields": "averageCharsPerToken (double)",
+      "whyWeNeedIt": "Determines token load before making network calls, preventing unexpected context window overflow errors."
+    },
+    {
+      "className": "ContextCompactor",
+      "packageName": "com.leanllm.agent",
+      "category": "Context Management",
+      "purpose": "Applies sliding-window truncation and system prompt preservation to conversational history.",
+      "fields": "maxTokenAllowance (int), tokenEstimator (TokenEstimator)",
+      "whyWeNeedIt": "Ensures agent history remains strictly within model limits during long multi-step reasoning loops."
+    },
+    {
+      "className": "EphemeralScriptManager",
+      "packageName": "com.leanllm.scripting",
+      "category": "Script Lifecycle",
+      "purpose": "Safely creates, executes, and deterministically deletes temporary script files.",
+      "fields": "sandboxedDirectory (Path)",
+      "whyWeNeedIt": "Manages the disk footprint of agent-generated TypeScript and Python scripts with automatic deletion upon completion."
+    }
+  ],
+  "obsidianWikiDocumentationSystem": {
+    "systemDescription": "A structured, bi-directionally linked Markdown wiki designed specifically for retrieval by agentic LLMs. Instead of forcing an LLM to ingest the entire codebase, the agent reads a lightweight root index file (INDEX.md) and follows explicit [[WikiLinks]] and YAML frontmatter tags directly to the target module.",
+    "rootIndexFile": {
+      "fileName": "INDEX.md",
+      "contentBlueprint": {
+        "title": "Lean Java Agentic Core - Knowledge Graph Index",
+        "description": "Master navigation index for autonomous agents and developers. Follow links to access domain-specific architectural modules.",
+        "yamlFrontmatter": {
+          "type": "index",
+          "version": "1.0.0",
+          "targetJdk": "21-LTS",
+          "dependencies": "none"
+        },
+        "navigationSections": [
+          {
+            "category": "Security & Isolation",
+            "links": [
+              "[[docs/security/SecureSecret|Secure Secret Handling]]",
+              "[[docs/security/EnvironmentSanitizer|Process Environment Sanitization]]",
+              "[[docs/security/ProcessTreeTerminator|Subprocess Tree Clean-Up]]"
+            ]
+          },
+          {
+            "category": "JSON & Data Protocol",
+            "links": [
+              "[[docs/json/JsonNode|Zero-Dependency JSON AST]]",
+              "[[docs/json/JsonParser|Recursive Descent Parser]]"
+            ]
+          },
+          {
+            "category": "Domain & Messaging",
+            "links": [
+              "[[docs/domain/ChatMessage|Chat Turn Modeling]]",
+              "[[docs/domain/ToolContract|Tool Schemas & Function Calling]]",
+              "[[docs/domain/InferenceProtocol|Request & Response Payloads]]",
+              "[[docs/domain/ContextManagement|Token Estimation & Truncation]]"
+            ]
+          },
+          {
+            "category": "Inference Clients",
+            "links": [
+              "[[docs/client/LlmClientContract|Inference Interface & Streaming]]",
+              "[[docs/client/CloudLlmClient|Cloud REST & Auth Headers]]",
+              "[[docs/client/LocalLlmClient|Local Loopback & SSRF Defense]]"
+            ]
+          },
+          {
+            "category": "Dynamic Scripting",
+            "links": [
+              "[[docs/scripting/ProcessRunner|Non-Blocking Process Execution]]",
+              "[[docs/scripting/TypeScriptRunner|TypeScript Runtime Integration]]",
+              "[[docs/scripting/PythonRunner|Python Runtime Integration]]",
+              "[[docs/scripting/EphemeralScripts|Temporary Script Lifecycle]]"
+            ]
+          },
+          {
+            "category": "Agent & Presentation",
+            "links": [
+              "[[docs/agent/ReActEngine|Cyclical Reasoning Loop]]",
+              "[[docs/agent/ScriptDelegation|Tool-to-Script Delegation]]",
+              "[[docs/ui/UiBridge|Presentation Decoupling Bridge]]",
+              "[[docs/factory/LifecycleFactories|Dynamic Instantiation Factories]]"
+            ]
+          }
+        ]
+      }
+    },
+    "pageTemplateStandard": {
+      "format": "Obsidian Flavored Markdown",
+      "requiredSections": [
+        {
+          "name": "YAML Frontmatter",
+          "specification": "Must contain: id, title, type (interface|record|class), module, context_cost (tokens), related_links ([[link]]), and tags."
+        },
+        {
+          "name": "Component Overview",
+          "specification": "A concise summary (< 80 words) describing the component's sole responsibility."
+        },
+        {
+          "name": "Architectural Rationale",
+          "specification": "Explains why this class exists and why external dependencies were rejected."
+        },
+        {
+          "name": "Security & Edge Considerations",
+          "specification": "Details threat vectors, memory characteristics, and safety boundaries."
+        },
+        {
+          "name": "Class Contract & Fields",
+          "specification": "A compact table listing field names, types, and behavioral expectations."
+        },
+        {
+          "name": "Interconnection Map",
+          "specification": "Explicit [[WikiLinks]] specifying upstream callers and downstream dependencies."
+        }
+      ]
+    },
+    "sampleWikiPage": {
+      "path": "docs/security/SecureSecret.md",
+      "rawMarkdown": "---\nid: SEC-01\ntitle: SecureSecret\ntype: class\nmodule: com.leanllm.security\ncontext_cost: 320\ntags: [security, memory-safety, credentials]\nrelated_links:\n  - \"[[docs/client/CloudLlmClient]]\"\n  - \"[[docs/factory/LlmClientFactory]]\"\n---\n\n# SecureSecret\n\n## Overview\n`SecureSecret` is a memory-safe credential wrapper that holds sensitive authorization keys in a mutable `char[]` buffer, providing explicit wiping capabilities via `AutoCloseable`.\n\n## Rationale\nStandard Java `String` objects reside in the String Pool or JVM heap indefinitely until garbage-collected, making them extractable via heap analysis. `SecureSecret` enables deterministic zeroing out with null bytes (`\\0`) immediately after header transmission.\n\n## Security Contract\n- Implements `AutoCloseable` and `java.security.Destroyable`.\n- Any invocation of `accessSecret()` after `close()` throws `IllegalStateException`.\n- Thread-safe via synchronized access locks.\n\n## Connections\n- Instantiated by: [[docs/factory/LlmClientFactory]]\n- Consumed by: [[docs/client/CloudLlmClient]]\n- Siblings: [[docs/security/EnvironmentSanitizer]]"
+    }
+  },
+  "modularRefactoringPlan": {
+    "step1": "Convert immutable data carrier POJOs (ChatMessage, ToolCall, ToolDefinition, InferenceResponse) to Java Records to minimize code footprint and token usage.",
+    "step2": "Implement TokenEstimator and ContextCompactor to give AgentContext full control over token budget preservation.",
+    "step3": "Enhance AbstractProcessRunner with ProcessTreeTerminator using Java 21 ProcessHandle and Virtual Threads for async stream drainage.",
+    "step4": "Add CancellationToken across LlmClient.stream() and AgentEngine.run() to allow responsive cancellations from UIBridge.",
+    "step5": "Generate the complete set of Obsidian Markdown docs with bidirectional [[WikiLinks]] to establish the retrieval graph before full code generation."
+  }
+}

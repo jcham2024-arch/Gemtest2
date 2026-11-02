@@ -1,0 +1,526 @@
+{
+  "projectMetadata": {
+    "projectName": "Lean Java Agentic Core (LJAC)",
+    "version": "1.0.0",
+    "targetJdk": "Java 21 LTS (strictly java.base module)",
+    "dependencyPolicy": "Zero external runtime dependencies. No third-party libraries permitted.",
+    "polyglotStrategy": {
+      "orchestrationCore": "Pure Java 21 POJOs, Records, and Interfaces.",
+      "primaryScriptingLanguage": "TypeScript (Deno / Bun / ts-node) - Preferred for all dynamic logic, dynamic API integrations, data transformations, and agent tool execution.",
+      "secondaryScriptingLanguage": "Python 3 - Strictly opt-in for task-specific computing where Python is markedly superior (e.g., specialized ML inference, complex numerical math, scientific libraries).",
+      "decouplingMandate": "Phase 1 creates the Java backend infrastructure only. Java classes provide abstract process bridges, factories, schema descriptors, and execution envelopes. Concrete script assets (.ts and .py) are developed independently in later phases."
+    }
+  },
+  "masterContextBlock": {
+    "vision": "A self-contained, enterprise-grade, ultra-lean agentic framework capable of running on any machine with a standard JVM. The system manages autonomous ReAct (Reason + Act) cycles, provides transparent local and cloud LLM inference, and delegates dynamic workloads to sandboxed external scripts without native JNI bindings or heavy embedded interpreters.",
+    "architecturalPrinciples": [
+      {
+        "name": "Dependency-Free Resilience",
+        "description": "Built solely on java.base. Eliminates vulnerability surface area (CVEs), supply chain attacks, breaking updates, and dependency conflicts."
+      },
+      {
+        "name": "Context-Window-Aware Code Design",
+        "description": "Every class is designed to be ingested by subsequent LLM agents with minimum token overhead. Classes must be atomic (< 120 lines of code), use Java Records for data carriers, and employ high-density standardized Javadoc tags."
+      },
+      {
+        "name": "Deterministic Memory Hygiene",
+        "description": "Authorization keys and secrets reside in mutable character buffers rather than immutable Java Strings, allowing explicit wiping with null bytes upon completion."
+      },
+      {
+        "name": "OS-Level Subprocess Isolation",
+        "description": "Dynamic script logic runs in isolated operating system processes managed directly via ProcessBuilder without intermediate shell wrappers (no 'sh -c' or 'cmd /c'), mitigating injection vectors."
+      },
+      {
+        "name": "Bi-Directional Wiki Architecture",
+        "description": "An Obsidian-style Markdown documentation graph accompanies the codebase. Downstream agents navigate via INDEX.md and [[WikiLinks]] rather than ingesting entire file trees."
+      }
+    ]
+  },
+  "subsystemArchitecture": {
+    "securityAndConcurrency": {
+      "description": "Manages credential zeroing, environment allowlisting, virtual-thread asynchronous I/O, process tree termination, and cooperative task cancellation.",
+      "keyMechanisms": [
+        "SecureSecret: Character buffer credential holder implementing AutoCloseable and Destroyable.",
+        "EnvironmentSanitizer: Whitelist-only environment map builder that blocks host secret exfiltration.",
+        "ProcessTreeTerminator: Uses JDK 21 ProcessHandle API to kill entire process trees, preventing zombie processes.",
+        "CancellationToken: Atomic signaling primitive for halting inference streams and script executions.",
+        "Virtual Threads: java.lang.Thread.ofVirtual() for lightweight, non-blocking stream drainage."
+      ]
+    },
+    "zeroDependencyJson": {
+      "description": "A self-contained JSON Abstract Syntax Tree (AST) and recursive-descent parser providing complete serialization and extraction without Jackson or Gson.",
+      "keyMechanisms": [
+        "JsonNode: Sealed or abstract AST root with lightweight subtypes (JsonObject, JsonArray, JsonString, JsonNumber, JsonBoolean, JsonNull).",
+        "JsonParser: Zero-dependency recursive descent parser with depth limits to defend against deeply nested stack-overflow attacks."
+      ]
+    },
+    "domainAndContextManagement": {
+      "description": "Normalized data carriers for conversational turns, tool schemas, token estimation, and context budget management.",
+      "keyMechanisms": [
+        "Java Records for immutability and token economy: ChatMessage, ToolCall, ToolDefinition, InferenceRequest, InferenceResponse.",
+        "TokenEstimator: Zero-dependency character-to-token heuristic calculator (~3.8 to 4.0 chars/token).",
+        "ContextCompactor: Sliding-window history pruner preserving system prompts while keeping message history within model limits."
+      ]
+    },
+    "inferenceAndTransport": {
+      "description": "Unified client layer built on java.net.http.HttpClient supporting HTTP/2, Server-Sent Events (SSE) streaming, and loopback verification.",
+      "keyMechanisms": [
+        "LlmClient: Common strategy contract for synchronous and streaming inference.",
+        "AbstractHttpLlmClient: Shared HTTP/2 transport engine with zero-dependency SSE line parsing.",
+        "CloudLlmClient: Cloud provider client injecting authorization headers directly from SecureSecret.",
+        "LocalLlmClient: Loopback client targeting local daemons (Ollama, llama.cpp server) with strict SSRF defense."
+      ]
+    },
+    "polyglotScriptingBridge": {
+      "description": "Standardized execution runners for dynamic scripts, emphasizing TypeScript as the primary engine and Python as an auxiliary engine.",
+      "keyMechanisms": [
+        "AbstractProcessRunner: Base runner managing virtual-thread stream readers, timeouts, and process tree destruction.",
+        "TypeScriptRunner: Primary execution runner targeting modern runtimes (Deno, Bun, or ts-node) with permission flags.",
+        "PythonRunner: Specialized runner targeting python3 or isolated virtual environment (venv) binaries.",
+        "EphemeralScriptManager: Manages temporary script file lifecycles with guaranteed deletion via AutoCloseable."
+      ]
+    },
+    "agenticLoopAndPresentation": {
+      "description": "The autonomous ReAct (Reasoning + Acting) execution engine and decoupled presentation abstraction.",
+      "keyMechanisms": [
+        "AgentEngine: Orchestrates the multi-turn Thought-Action-Observation loop.",
+        "Tool & ScriptDelegatingTool: Executable interfaces binding LLM tool calls to TypeScript or Python scripts.",
+        "AgentContext: Stateful session tracker enforcing maximum iteration bounds.",
+        "UiBridge: Decoupled observer interface allowing any presentation layer (JavaFX, CLI, WebSockets) to subscribe to streaming tokens, status updates, and tool execution events."
+      ]
+    },
+    "factoriesAndDiscovery": {
+      "description": "Factory layer for dynamically instantiating clients and script runners based on runtime configuration and host binary availability.",
+      "keyMechanisms": [
+        "LlmClientFactory: Instantiates configured local or cloud clients with validation.",
+        "ScriptRunnerFactory: Discovers available runtimes on the system PATH with a fallback order favoring TypeScript runtimes (Deno -> Bun -> ts-node) before Python."
+      ]
+    }
+  },
+  "codebaseInventory": [
+    {
+      "className": "SecureSecret",
+      "package": "com.leanllm.security",
+      "type": "class",
+      "locTarget": "< 80 LOC",
+      "purpose": "Stores API tokens in mutable char[] buffers with explicit deterministic wiping via AutoCloseable.",
+      "fields": "char[] secretBuffer, boolean destroyed",
+      "methods": "char[] accessSecret(), void close(), boolean isDestroyed()",
+      "instructions": "Ensure accessSecret() throws IllegalStateException if destroyed. Do not create intermediate String objects in internal state."
+    },
+    {
+      "className": "EnvironmentSanitizer",
+      "package": "com.leanllm.security",
+      "type": "class",
+      "locTarget": "< 60 LOC",
+      "purpose": "Filters process environment blocks using an explicit allowlist to prevent secret exfiltration to child scripts.",
+      "fields": "Set<String> allowedKeys",
+      "methods": "Map<String, String> sanitize(Map<String, String> sourceEnv), static EnvironmentSanitizer defaultSandbox()",
+      "instructions": "Return unmodifiable collections. Default sandbox should permit only PATH, TEMP, TMP, and USER."
+    },
+    {
+      "className": "ProcessTreeTerminator",
+      "package": "com.leanllm.security",
+      "type": "class",
+      "locTarget": "< 70 LOC",
+      "purpose": "Recursively terminates root and descendant processes using JDK ProcessHandle to eliminate orphan processes.",
+      "fields": "long gracePeriodMillis",
+      "methods": "void destroyTree(Process process)",
+      "instructions": "Use process.toHandle().descendants() and attempt graceful destroy() before invoking destroyForcibly()."
+    },
+    {
+      "className": "CancellationToken",
+      "package": "com.leanllm.concurrency",
+      "type": "class",
+      "locTarget": "< 60 LOC",
+      "purpose": "Thread-safe cancellation signaling primitive passed through the inference and tool execution layers.",
+      "fields": "AtomicBoolean cancelled, String cancelReason, List<Runnable> cancellationCallbacks",
+      "methods": "void cancel(String reason), boolean isCancelled(), String getCancelReason(), void onCancel(Runnable callback)",
+      "instructions": "Ensure thread-safe callback registration and execution using synchronized blocks or concurrent structures."
+    },
+    {
+      "className": "JsonNode",
+      "package": "com.leanllm.json",
+      "type": "abstract class / sealed interface",
+      "locTarget": "< 90 LOC",
+      "purpose": "Zero-dependency AST root for JSON data representation with depth-limit defense.",
+      "fields": "int MAX_RECURSION_DEPTH",
+      "methods": "abstract String serialize(), boolean isObject(), boolean isArray(), String asString(), JsonObject asObject(), JsonArray asArray()",
+      "instructions": "Implement subclasses as compact static inner records or separate micro-records (JsonObject, JsonArray, JsonString, JsonNumber, JsonBoolean, JsonNull)."
+    },
+    {
+      "className": "JsonParser",
+      "package": "com.leanllm.json",
+      "type": "class",
+      "locTarget": "< 120 LOC",
+      "purpose": "Zero-dependency recursive-descent JSON parser converting raw JSON strings into JsonNode hierarchies.",
+      "fields": "String source, int cursor, int currentDepth",
+      "methods": "static JsonNode parse(String rawJson), private JsonNode parseNext(), private String parseString(), private JsonObject parseObject(), private JsonArray parseArray()",
+      "instructions": "Keep the parser lean. Support standard escapes (\\\", \\\\, \\n, \\r, \\t). Throw descriptive ParseException on invalid input."
+    },
+    {
+      "className": "ChatRole",
+      "package": "com.leanllm.domain",
+      "type": "enum",
+      "locTarget": "< 25 LOC",
+      "purpose": "Defines valid conversational participant roles.",
+      "fields": "SYSTEM, USER, ASSISTANT, TOOL",
+      "methods": "String roleName()",
+      "instructions": "Provide lowercase serialization helper for wire format compliance."
+    },
+    {
+      "className": "ChatMessage",
+      "package": "com.leanllm.domain",
+      "type": "record",
+      "locTarget": "< 45 LOC",
+      "purpose": "Immutable record representing a conversational message turn.",
+      "fields": "ChatRole role, String content, String toolCallId, List<ToolCall> toolCalls",
+      "methods": "static ChatMessage system(String text), static ChatMessage user(String text), static ChatMessage assistant(String text), static ChatMessage toolResult(String callId, String output)",
+      "instructions": "Compact record with static factory methods. Ensure toolCalls collection is defensively copied and unmodifiable."
+    },
+    {
+      "className": "ToolCall",
+      "package": "com.leanllm.domain",
+      "type": "record",
+      "locTarget": "< 30 LOC",
+      "purpose": "Immutable record capturing a model tool execution directive.",
+      "fields": "String id, String functionName, String rawArgumentsJson",
+      "methods": "Standard record getters",
+      "instructions": "Ensure non-null constraints are validated in the compact constructor."
+    },
+    {
+      "className": "ToolDefinition",
+      "package": "com.leanllm.domain",
+      "type": "record",
+      "locTarget": "< 35 LOC",
+      "purpose": "Immutable record describing tool identity and JSON Schema parameters to the LLM.",
+      "fields": "String name, String description, JsonNode parametersSchema",
+      "methods": "Standard record getters",
+      "instructions": "Validate that tool name matches the standard identifier pattern ^[a-zA-Z0-9_-]{1,64}$."
+    },
+    {
+      "className": "InferenceRequest",
+      "package": "com.leanllm.domain",
+      "type": "record",
+      "locTarget": "< 50 LOC",
+      "purpose": "Immutable container carrying message history, available tool definitions, and sampling parameters.",
+      "fields": "String modelId, List<ChatMessage> messages, List<ToolDefinition> tools, double temperature, int maxTokens",
+      "methods": "Standard record getters",
+      "instructions": "Clamp temperature between 0.0 and 2.0. Ensure messages and tools are unmodifiable lists."
+    },
+    {
+      "className": "InferenceResponse",
+      "package": "com.leanllm.domain",
+      "type": "record",
+      "locTarget": "< 45 LOC",
+      "purpose": "Normalized output structure from local or cloud inference.",
+      "fields": "ChatMessage message, List<ToolCall> toolCalls, long promptTokens, long completionTokens, String finishReason",
+      "methods": "boolean hasToolCalls()",
+      "instructions": "Compact record providing hasToolCalls() helper for ReAct branching."
+    },
+    {
+      "className": "TokenEstimator",
+      "package": "com.leanllm.domain",
+      "type": "class",
+      "locTarget": "< 50 LOC",
+      "purpose": "Zero-dependency heuristic character/token calculator preventing context overflow errors.",
+      "fields": "double averageCharsPerToken",
+      "methods": "int estimateTokens(String text), int estimateMessageTokens(List<ChatMessage> messages)",
+      "instructions": "Use a default ratio of 3.8 chars/token. Include safety margin in estimations."
+    },
+    {
+      "className": "StreamConsumer",
+      "package": "com.leanllm.client",
+      "type": "interface",
+      "locTarget": "< 30 LOC",
+      "purpose": "Callback listener receiving real-time token fragments and streaming status updates.",
+      "fields": "None",
+      "methods": "void onToken(String tokenDelta), void onError(Throwable error), void onComplete(InferenceResponse finalResponse)",
+      "instructions": "Document thread context expectations for implementing listeners."
+    },
+    {
+      "className": "LlmClient",
+      "package": "com.leanllm.client",
+      "type": "interface",
+      "locTarget": "< 35 LOC",
+      "purpose": "Common contract for synchronous and streaming LLM inference.",
+      "fields": "None",
+      "methods": "InferenceResponse complete(InferenceRequest req, CancellationToken token) throws Exception, void stream(InferenceRequest req, StreamConsumer consumer, CancellationToken token) throws Exception, boolean isAvailable()",
+      "instructions": "Pass CancellationToken through all network operations."
+    },
+    {
+      "className": "AbstractHttpLlmClient",
+      "package": "com.leanllm.client.http",
+      "type": "abstract class",
+      "locTarget": "< 110 LOC",
+      "purpose": "Shared HTTP/2 transport engine using JDK HttpClient and zero-dependency SSE stream parser.",
+      "fields": "URI endpoint, SecureSecret credentials, HttpClient httpClient, Duration timeout",
+      "methods": "protected HttpResponse<String> postJson(String body, CancellationToken token), protected void parseServerSentEvents(InputStream stream, StreamConsumer consumer, CancellationToken token)",
+      "instructions": "Parse SSE 'data: {...}' lines using BufferedReader. Verify cancellationToken during line loops."
+    },
+    {
+      "className": "CloudLlmClient",
+      "package": "com.leanllm.client.cloud",
+      "type": "class",
+      "locTarget": "< 95 LOC",
+      "purpose": "Specialized client for OpenAI-compatible and enterprise cloud REST endpoints.",
+      "fields": "Map<String, String> defaultHeaders",
+      "methods": "InferenceResponse complete(InferenceRequest req, CancellationToken token), void stream(InferenceRequest req, StreamConsumer consumer, CancellationToken token)",
+      "instructions": "Inject authorization header from credentials without creating permanent heap Strings. Format request as JSON via JsonNode."
+    },
+    {
+      "className": "LocalLlmClient",
+      "package": "com.leanllm.client.local",
+      "type": "class",
+      "locTarget": "< 85 LOC",
+      "purpose": "Specialized client for local daemons (Ollama, llama.cpp server) on loopback interfaces.",
+      "fields": "None (uses parent endpoint without auth)",
+      "methods": "private static URI validateLoopback(URI uri), InferenceResponse complete(InferenceRequest req, CancellationToken token), void stream(InferenceRequest req, StreamConsumer consumer, CancellationToken token)",
+      "instructions": "Strictly assert host equals localhost, 127.0.0.1, or ::1 to prevent SSRF vulnerabilities."
+    },
+    {
+      "className": "ScriptExecutionRequest",
+      "package": "com.leanllm.scripting",
+      "type": "record",
+      "locTarget": "< 45 LOC",
+      "purpose": "Immutable execution parameters for external TypeScript and Python scripts.",
+      "fields": "Path scriptPath, List<String> arguments, Map<String, String> environmentOverrides, Path workingDirectory, Duration timeout",
+      "methods": "Standard record getters",
+      "instructions": "Validate script path existence and defensive copy argument collections."
+    },
+    {
+      "className": "ScriptExecutionResult",
+      "package": "com.leanllm.scripting",
+      "type": "record",
+      "locTarget": "< 40 LOC",
+      "purpose": "Captures exit code, stdout, stderr, and elapsed execution time of guest scripts.",
+      "fields": "int exitCode, String stdout, String stderr, Duration duration",
+      "methods": "boolean isSuccess()",
+      "instructions": "isSuccess() returns true if exitCode == 0."
+    },
+    {
+      "className": "EphemeralScriptManager",
+      "package": "com.leanllm.scripting",
+      "type": "class",
+      "locTarget": "< 75 LOC",
+      "purpose": "Safely writes, stores, and deterministically deletes temporary script files.",
+      "fields": "Path sandboxedDirectory",
+      "methods": "Path createScript(String filename, String content), void deleteScript(Path path), void purgeAll()",
+      "instructions": "Implements AutoCloseable to purge all generated temporary scripts on shutdown."
+    },
+    {
+      "className": "AbstractProcessRunner",
+      "package": "com.leanllm.scripting",
+      "type": "abstract class",
+      "locTarget": "< 115 LOC",
+      "purpose": "Supervises process lifecycles using ProcessBuilder, Virtual Threads, and ProcessTreeTerminator.",
+      "fields": "String executableBinary, EnvironmentSanitizer sanitizer, ProcessTreeTerminator terminator",
+      "methods": "ScriptExecutionResult run(ScriptExecutionRequest request, CancellationToken token) throws Exception, protected abstract List<String> buildPreArguments()",
+      "instructions": "Use Thread.ofVirtual().start() for draining stdout and stderr concurrently to prevent buffer deadlocks."
+    },
+    {
+      "className": "TypeScriptRunner",
+      "package": "com.leanllm.scripting.ts",
+      "type": "class",
+      "locTarget": "< 65 LOC",
+      "purpose": "Primary runner specialized for dynamic TypeScript execution via Deno, Bun, or ts-node.",
+      "fields": "String runtimeEngine, List<String> sandboxFlags",
+      "methods": "protected List<String> buildPreArguments()",
+      "instructions": "Inject permission flags (e.g., Deno '--deny-net' or specific directory allowlists) before script paths."
+    },
+    {
+      "className": "PythonRunner",
+      "package": "com.leanllm.scripting.python",
+      "type": "class",
+      "locTarget": "< 60 LOC",
+      "purpose": "Secondary runner specialized for task-specific Python execution via python3 or virtual environments.",
+      "fields": "Path pythonExecutablePath",
+      "methods": "protected List<String> buildPreArguments()",
+      "instructions": "Inject '-B' (do not write bytecode) and '-u' (unbuffered binary stdout/stderr) flags by default."
+    },
+    {
+      "className": "Tool",
+      "package": "com.leanllm.agent",
+      "type": "interface",
+      "locTarget": "< 30 LOC",
+      "purpose": "Executable contract binding a ToolDefinition schema to an execution routine.",
+      "fields": "None",
+      "methods": "ToolDefinition getDefinition(), String execute(String rawArgumentsJson, CancellationToken token) throws Exception",
+      "instructions": "Keep tool execution independent of transport and UI concerns."
+    },
+    {
+      "className": "ScriptDelegatingTool",
+      "package": "com.leanllm.agent",
+      "type": "class",
+      "locTarget": "< 80 LOC",
+      "purpose": "Bridge tool delegating LLM tool invocations to a dynamic TypeScript (preferred) or Python script.",
+      "fields": "ToolDefinition definition, AbstractProcessRunner runner, Path scriptPath, Duration timeout",
+      "methods": "ToolDefinition getDefinition(), String execute(String rawArgumentsJson, CancellationToken token)",
+      "instructions": "Package JSON arguments into ScriptExecutionRequest. Return stderr details if exitCode != 0."
+    },
+    {
+      "className": "ContextCompactor",
+      "package": "com.leanllm.agent",
+      "type": "class",
+      "locTarget": "< 85 LOC",
+      "purpose": "Enforces sliding-window history compacting to keep conversational history within model limits.",
+      "fields": "int maxAllowedTokens, TokenEstimator estimator",
+      "methods": "List<ChatMessage> compact(List<ChatMessage> history)",
+      "instructions": "Always retain system messages at the start of history. Prune oldest user/assistant turns first."
+    },
+    {
+      "className": "AgentContext",
+      "package": "com.leanllm.agent",
+      "type": "class",
+      "locTarget": "< 75 LOC",
+      "purpose": "Thread-safe state manager for conversational history and iteration bounds.",
+      "fields": "List<ChatMessage> conversationHistory, int maxIterations, int currentIteration, ContextCompactor compactor",
+      "methods": "synchronized void append(ChatMessage msg), synchronized boolean canIterate(), synchronized void nextIteration(), synchronized List<ChatMessage> getHistory()",
+      "instructions": "Enforce hard max iteration thresholds (e.g., 10 turns) to prevent infinite ReAct loops."
+    },
+    {
+      "className": "UiBridge",
+      "package": "com.leanllm.ui",
+      "type": "interface",
+      "locTarget": "< 45 LOC",
+      "purpose": "Event-driven decoupling interface connecting the core agent to any UI (JavaFX, CLI, WebSockets).",
+      "fields": "None",
+      "methods": "void onStatus(String status), void onToken(String tokenDelta), void onToolStart(String toolName, String args), void onToolEnd(String toolName, String output), void onError(String message, Throwable cause)",
+      "instructions": "All methods must be non-blocking. Implementations handle thread switching (e.g., JavaFX Platform.runLater)."
+    },
+    {
+      "className": "AgentEngine",
+      "package": "com.leanllm.agent",
+      "type": "class",
+      "locTarget": "< 115 LOC",
+      "purpose": "Executes the multi-turn ReAct (Thought -> Action -> Observation) cognitive loop.",
+      "fields": "LlmClient client, String modelId, Map<String, Tool> toolRegistry, UiBridge uiBridge",
+      "methods": "void registerTool(Tool tool), String run(AgentContext context, String userQuery, CancellationToken token) throws Exception",
+      "instructions": "Cycle until LLM generates final response without tool calls or iteration limit is reached. Report events to UiBridge."
+    },
+    {
+      "className": "LlmClientFactory",
+      "package": "com.leanllm.factory",
+      "type": "class",
+      "locTarget": "< 65 LOC",
+      "purpose": "Factory instantiating validated local and cloud LLM clients.",
+      "fields": "None",
+      "methods": "static LlmClient createCloud(URI endpoint, SecureSecret apiKey, Duration timeout), static LlmClient createLocal(URI loopbackUri, Duration timeout)",
+      "instructions": "Validate parameters and ensure proper setup of TLS and timeout options."
+    },
+    {
+      "className": "ScriptRunnerFactory",
+      "package": "com.leanllm.factory",
+      "type": "class",
+      "locTarget": "< 80 LOC",
+      "purpose": "Discovers and instantiates TypeScript and Python runners on the host system.",
+      "fields": "None",
+      "methods": "static TypeScriptRunner createTypeScriptRunner(), static PythonRunner createPythonRunner(Path optionalVenvPath)",
+      "instructions": "Prioritize TypeScript runtimes: inspect system PATH for Deno, then Bun, then ts-node. Python is configured explicitly or via venv."
+    }
+  ],
+  "obsidianWikiDocumentationPlan": {
+    "rootFile": "INDEX.md",
+    "structure": {
+      "format": "Obsidian Flavored Markdown with YAML Frontmatter and [[WikiLinks]]",
+      "frontmatterSchema": {
+        "id": "Standard module code (e.g., SEC-01, SCRIPT-02)",
+        "title": "Component name",
+        "type": "record | class | interface",
+        "module": "Java package path",
+        "context_cost": "Estimated tokens to read (< 400)",
+        "tags": ["security", "transport", "agent-core", "scripting", "json"],
+        "related_links": ["[[docs/module/TargetPage]]"]
+      },
+      "pageIndex": [
+        {
+          "file": "INDEX.md",
+          "title": "Master Knowledge Graph Index",
+          "summary": "Central entrypoint linking all architectural domains for downstream LLM navigation."
+        },
+        {
+          "file": "docs/security/SecureSecret.md",
+          "title": "Memory-Safe Credential Hygiene",
+          "links": ["[[docs/client/CloudLlmClient]]", "[[docs/factory/LlmClientFactory]]"]
+        },
+        {
+          "file": "docs/security/ProcessTreeTerminator.md",
+          "title": "Zombie Process Elimination",
+          "links": ["[[docs/scripting/AbstractProcessRunner]]"]
+        },
+        {
+          "file": "docs/json/ZeroDepJson.md",
+          "title": "Zero-Dependency JSON AST & Parser",
+          "links": ["[[docs/domain/ToolDefinition]]", "[[docs/client/AbstractHttpLlmClient]]"]
+        },
+        {
+          "file": "docs/domain/MessageProtocol.md",
+          "title": "Canonical Chat Turns and Tool Schemas",
+          "links": ["[[docs/agent/AgentEngine]]", "[[docs/agent/ContextCompactor]]"]
+        },
+        {
+          "file": "docs/client/InferenceClients.md",
+          "title": "Cloud REST & Local Loopback Clients",
+          "links": ["[[docs/security/SecureSecret]]", "[[docs/ui/UiBridge]]"]
+        },
+        {
+          "file": "docs/scripting/PolyglotExecution.md",
+          "title": "TypeScript and Python Process Isolation",
+          "links": ["[[docs/agent/ScriptDelegatingTool]]", "[[docs/factory/ScriptRunnerFactory]]"]
+        },
+        {
+          "file": "docs/agent/ReActOrchestration.md",
+          "title": "Autonomous ReAct Engine & State Context",
+          "links": ["[[docs/ui/UiBridge]]", "[[docs/domain/MessageProtocol]]"]
+        },
+        {
+          "file": "docs/ui/UiDecoupling.md",
+          "title": "Presentation Abstraction via UiBridge",
+          "links": ["[[docs/agent/AgentEngine]]"]
+        }
+      ]
+    }
+  },
+  "downstreamAgentInstructions": [
+    {
+      "step": 1,
+      "task": "Obsidian Documentation Generation",
+      "details": "First create INDEX.md and the nine linked markdown files in docs/. This establishes the contextual knowledge graph and architectural contracts before code generation."
+    },
+    {
+      "step": 2,
+      "task": "Foundation & Security Layer Generation",
+      "details": "Implement SecureSecret, EnvironmentSanitizer, ProcessTreeTerminator, and CancellationToken. Ensure zero third-party imports and verify mutable char buffer memory scrubbing."
+    },
+    {
+      "step": 3,
+      "task": "Zero-Dependency JSON Engine Generation",
+      "details": "Implement JsonNode (and its compact subtype records) and JsonParser. Validate recursion depth limits and string escaping correctness."
+    },
+    {
+      "step": 4,
+      "task": "Domain Records & Token Management Generation",
+      "details": "Implement ChatRole, ChatMessage, ToolCall, ToolDefinition, InferenceRequest, InferenceResponse, TokenEstimator, and ContextCompactor. Use Java Records to minimize code footprint."
+    },
+    {
+      "step": 5,
+      "task": "Transport & Inference Client Layer Generation",
+      "details": "Implement StreamConsumer, LlmClient, AbstractHttpLlmClient, CloudLlmClient, and LocalLlmClient. Use JDK HttpClient and implement zero-dependency SSE parsing via BufferedReader."
+    },
+    {
+      "step": 6,
+      "task": "Polyglot Scripting Bridge Generation",
+      "details": "Implement ScriptExecutionRequest, ScriptExecutionResult, EphemeralScriptManager, AbstractProcessRunner, TypeScriptRunner, and PythonRunner. Ensure virtual threads drain streams and TypeScript is set as the primary runner."
+    },
+    {
+      "step": 7,
+      "task": "Agentic Core & Presentation Layer Generation",
+      "details": "Implement Tool, ScriptDelegatingTool, AgentContext, AgentEngine, and UiBridge. Verify the ReAct loop terminates gracefully and propagates token streaming events to UiBridge."
+    },
+    {
+      "step": 8,
+      "task": "Factories & Compilation Verification",
+      "details": "Implement LlmClientFactory and ScriptRunnerFactory. Run a standard JDK javac build across all packages to verify 100% clean compilation with zero warnings."
+    }
+  ]
+}

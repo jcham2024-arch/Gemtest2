@@ -1,0 +1,933 @@
+{
+  "projectContext": {
+    "projectName": "Lean Java Agentic Core (LJAC)",
+    "architectureStyle": "Zero-Dependency Enterprise Modular POJO Engine",
+    "targetJvm": "Java 21 LTS (or higher standard JDK, strictly java.base module)",
+    "missionStatement": "Provide an ultra-lean, highly secure, fully decoupled Java POJO foundation that orchestrates local and cloud LLM inference, autonomous ReAct agent loops, dynamic polyglot script executions (TypeScript and Python), and presentation layers (JavaFX/CLI/Headless) without relying on any third-party frameworks or external libraries.",
+    "coreDirectivesForDownstreamAgents": [
+      "Do not import any third-party library or external dependency (no Jackson, no Gson, no Spring, no Apache Commons, no OkHttp). Rely exclusively on standard JDK packages (java.net.http, java.io, java.nio, java.util, java.security, java.lang.ProcessBuilder).",
+      "All classes must be Plain Old Java Objects (POJOs), Records, or clean Interfaces adhering strictly to Single Responsibility and modularity principles.",
+      "Implement comprehensive, enterprise-grade Javadoc on every single class, field, method, and constructor detailing operational mechanics, edge cases, thread-safety, and exception contracts.",
+      "Sensitive credentials must never be stored as immutable java.lang.String instances. Use mutable character structures that implement AutoCloseable and Destroyable for immediate memory scrubbing.",
+      "Dynamic scripting (TypeScript, Python) and presentation engines (JavaFX, Terminal, WebSockets) must be completely decoupled behind factory-instantiated POJO bridges and abstract process runners.",
+      "Keep all abstractions lean; implement only the methods and properties necessary for the agentic chat lifecycle to minimize memory footprint and execution overhead."
+    ]
+  },
+  "architecturalBlueprint": {
+    "layers": [
+      {
+        "layerName": "Security & Memory Hygiene Layer",
+        "description": "Provides memory-safe storage for authorization credentials, environment variable sanitizers, and execution boundary validators."
+      },
+      {
+        "layerName": "Zero-Dependency Protocol & JSON Engine Layer",
+        "description": "Provides native AST structures and serialization/deserialization mechanics for handling structured LLM conversations and tool schemas without external JSON libraries."
+      },
+      {
+        "layerName": "Domain Model & Chat Abstraction Layer",
+        "description": "Defines canonical representations of conversational turns, streaming token deltas, tool declarations, tool execution requests, and model parameters."
+      },
+      {
+        "layerName": "Inference Transport Layer",
+        "description": "Provides asynchronous, reactive, and synchronous communication abstractions over standard java.net.http for cloud providers and local inference engines."
+      },
+      {
+        "layerName": "Polyglot Script Execution Layer",
+        "description": "Manages isolated sub-process lifecycles for dynamic TypeScript and Python scripts, handling non-blocking stream drainage, argument sanitization, and timeouts."
+      },
+      {
+        "layerName": "UI & Presentation Abstraction Layer",
+        "description": "Exposes an event-driven observer bridge that decouples the agent engine from graphical (JavaFX), command-line, or headless interfaces."
+      },
+      {
+        "layerName": "Agentic Reasoning & Tool Orchestration Layer",
+        "description": "Drives the cyclical Reason-Act (ReAct) state machine, managing conversation context, tool resolution, script delegation, and execution limits."
+      },
+      {
+        "layerName": "Factory & Lifecycle Management Layer",
+        "description": "Dynamic factory patterns responsible for instantiating clients, runners, tools, and UI bridges based on runtime configuration."
+      }
+    ]
+  },
+  "pojoSpecifications": [
+    {
+      "className": "SecureSecret",
+      "packageName": "com.leanllm.security",
+      "type": "Concrete POJO",
+      "purpose": "Secure container for API tokens and authorization headers that allows deterministic memory scrubbing.",
+      "whyWeNeedIt": "Immutable Java Strings persist on the heap and can be inspected via memory dumps or swap space. A mutable character array allows immediate overwrite with null characters after the HTTP request is built.",
+      "securityAndEnterpriseNotes": "Implements AutoCloseable and java.security.Destroyable. Must be thread-safe via synchronized access and throw IllegalStateException if accessed after being cleared.",
+      "fieldsToImplement": [
+        {
+          "name": "secretBuffer",
+          "type": "char[]",
+          "description": "Internal mutable buffer storing sensitive characters."
+        },
+        {
+          "name": "destroyed",
+          "type": "boolean",
+          "description": "State flag tracking whether the secret has been purged."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "SecureSecret(char[] secret)",
+          "behavior": "Defensively copies input array into secretBuffer."
+        },
+        {
+          "signature": "SecureSecret(String secret)",
+          "behavior": "Converts string to character array and stores defensively."
+        },
+        {
+          "signature": "char[] accessSecret()",
+          "behavior": "Returns a defensive clone of secretBuffer; asserts active state."
+        },
+        {
+          "signature": "void close()",
+          "behavior": "Fills secretBuffer with '\\0' null bytes and marks destroyed as true."
+        },
+        {
+          "signature": "boolean isDestroyed()",
+          "behavior": "Returns current destroyed flag state."
+        }
+      ],
+      "instructionForGeneratingAgent": "Ensure zero String leakages in internal state. In the Javadoc, detail why character arrays were selected over standard String objects and include memory safety guarantees."
+    },
+    {
+      "className": "EnvironmentSanitizer",
+      "packageName": "com.leanllm.security",
+      "type": "Concrete POJO",
+      "purpose": "Sanitizes and filters host environment variables before passing them to external script runners.",
+      "whyWeNeedIt": "Prevent guest TypeScript and Python scripts from inheriting sensitive system environment variables (e.g., AWS credentials, database passwords, system paths).",
+      "securityAndEnterpriseNotes": "Employs an explicit allowlist strategy rather than a blocklist to ensure fail-secure defaults.",
+      "fieldsToImplement": [
+        {
+          "name": "allowedKeys",
+          "type": "Set<String>",
+          "description": "Unmodifiable set of permissible environment variable names."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "EnvironmentSanitizer(Set<String> allowedKeys)",
+          "behavior": "Stores an unmodifiable defensive copy of permitted environment keys."
+        },
+        {
+          "signature": "Map<String, String> sanitize(Map<String, String> sourceEnv)",
+          "behavior": "Filters source environment, returning a clean map containing only approved keys."
+        },
+        {
+          "signature": "static EnvironmentSanitizer defaultSandbox()",
+          "behavior": "Factory method returning standard minimal environment (PATH, TEMP, USER)."
+        }
+      ],
+      "instructionForGeneratingAgent": "Implement strict null checks and return unmodifiable collections. Document the defense-in-depth rationale against environment variable exfiltration."
+    },
+    {
+      "className": "JsonNode",
+      "packageName": "com.leanllm.json",
+      "type": "Abstract POJO / Sealed Hierarchy",
+      "purpose": "Lightweight, zero-dependency Abstract Syntax Tree representing any valid JSON token or container.",
+      "whyWeNeedIt": "LLM conversations, tool definitions, and API requests depend heavily on JSON schemas. We must avoid importing bulky third-party libraries like Jackson or Gson.",
+      "securityAndEnterpriseNotes": "Immutable by design. Must include depth-recursion limits to defend against deeply nested denial-of-service payloads.",
+      "fieldsToImplement": [
+        {
+          "name": "MAX_RECURSION_DEPTH",
+          "type": "int",
+          "description": "Constant safeguarding against stack overflow during AST traversal."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "abstract String serialize()",
+          "behavior": "Converts AST node to valid unescaped JSON string."
+        },
+        {
+          "signature": "boolean isObject()",
+          "behavior": "Returns true if this node is an instance of JsonObject."
+        },
+        {
+          "signature": "boolean isArray()",
+          "behavior": "Returns true if this node is an instance of JsonArray."
+        },
+        {
+          "signature": "String asString()",
+          "behavior": "Extracts string value or throws structured JsonTypeException."
+        }
+      ],
+      "instructionForGeneratingAgent": "Design as a clean sealed interface or abstract class with subclasses: JsonObject, JsonArray, JsonString, JsonNumber, JsonBoolean, and JsonNull. Include thorough Javadoc on zero-dependency JSON manipulation."
+    },
+    {
+      "className": "JsonParser",
+      "packageName": "com.leanllm.json",
+      "type": "Concrete Utility POJO",
+      "purpose": "Zero-dependency, recursive-descent JSON parser converting raw JSON strings into JsonNode hierarchies.",
+      "whyWeNeedIt": "Extracts tool call parameters and inference output without third-party dependencies.",
+      "securityAndEnterpriseNotes": "Must enforce maximum character parsing limits and recursion depth checks to mitigate parser exploitation.",
+      "fieldsToImplement": [
+        {
+          "name": "source",
+          "type": "String",
+          "description": "Source JSON string being parsed."
+        },
+        {
+          "name": "cursor",
+          "type": "int",
+          "description": "Current character position index."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "static JsonNode parse(String rawJson)",
+          "behavior": "Entrypoint initiating recursive descent parsing with whitespace trimming."
+        },
+        {
+          "signature": "private JsonNode parseNextToken()",
+          "behavior": "Identifies next token based on character inspection ('{', '[', '\"', digit, 't', 'f', 'n')."
+        },
+        {
+          "signature": "private String parseString()",
+          "behavior": "Extracts strings handling escape sequences (\\\", \\\\, \\n, \\r, \\t, \\uXXXX)."
+        }
+      ],
+      "instructionForGeneratingAgent": "Ensure comprehensive character escaping support and clear descriptive parsing exception messages containing exact cursor coordinates."
+    },
+    {
+      "className": "ChatMessage",
+      "packageName": "com.leanllm.domain",
+      "type": "Record or Immutable POJO",
+      "purpose": "Unified representation of an individual message turn within an agent conversational session.",
+      "whyWeNeedIt": "Encapsulates messages regardless of role (System, User, Assistant, Tool Result) and links tool calls to their respective outputs.",
+      "securityAndEnterpriseNotes": "Completely immutable to ensure thread safety across asynchronous execution turns.",
+      "fieldsToImplement": [
+        {
+          "name": "role",
+          "type": "ChatRole",
+          "description": "Enum indicating SYSTEM, USER, ASSISTANT, or TOOL."
+        },
+        {
+          "name": "content",
+          "type": "String",
+          "description": "Textual prompt or completion message."
+        },
+        {
+          "name": "toolCallId",
+          "type": "String",
+          "description": "Unique identifier connecting a tool response back to the original request."
+        },
+        {
+          "name": "toolCalls",
+          "type": "List<ToolCall>",
+          "description": "List of tool requests issued by the assistant during this turn."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "static ChatMessage system(String prompt)",
+          "behavior": "Constructs system role message."
+        },
+        {
+          "signature": "static ChatMessage user(String prompt)",
+          "behavior": "Constructs user role message."
+        },
+        {
+          "signature": "static ChatMessage assistant(String reply)",
+          "behavior": "Constructs plain assistant response message."
+        },
+        {
+          "signature": "static ChatMessage toolResult(String callId, String output)",
+          "behavior": "Constructs tool execution response message."
+        }
+      ],
+      "instructionForGeneratingAgent": "Use Java Records or immutable POJOs with unmodifiable lists for toolCalls. Javadoc must explain role demarcation in LLM conversational memory."
+    },
+    {
+      "className": "ToolCall",
+      "packageName": "com.leanllm.domain",
+      "type": "Record or Immutable POJO",
+      "purpose": "Encapsulates a model's request to execute an external capability or script.",
+      "whyWeNeedIt": "Carries the tool's unique identity, target function name, and raw JSON arguments parsed from the model.",
+      "securityAndEnterpriseNotes": "Stores arguments in raw unparsed format until an authorized tool runner validates them.",
+      "fieldsToImplement": [
+        {
+          "name": "id",
+          "type": "String",
+          "description": "Unique identifier generated by the LLM."
+        },
+        {
+          "name": "functionName",
+          "type": "String",
+          "description": "Target tool name to invoke."
+        },
+        {
+          "name": "argumentsJson",
+          "type": "String",
+          "description": "Raw JSON string containing argument parameters."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "ToolCall(String id, String functionName, String argumentsJson)",
+          "behavior": "Validates non-null constraints and initializes fields."
+        }
+      ],
+      "instructionForGeneratingAgent": "Annotate fields clearly and explain how tool invocation IDs maintain alignment in multi-tool agent cycles."
+    },
+    {
+      "className": "ToolDefinition",
+      "packageName": "com.leanllm.domain",
+      "type": "Record or Immutable POJO",
+      "purpose": "Declares the schema, description, and parameter contracts of an executable tool to the LLM.",
+      "whyWeNeedIt": "Allows dynamic generation of the JSON Schema payload required by LLMs for function calling.",
+      "securityAndEnterpriseNotes": "Includes validation that tool names match strict regex patterns (e.g., ^[a-zA-Z0-9_-]{1,64}$) to prevent prompt injection or execution confusion.",
+      "fieldsToImplement": [
+        {
+          "name": "name",
+          "type": "String",
+          "description": "Unique identifier of the tool."
+        },
+        {
+          "name": "description",
+          "type": "String",
+          "description": "Semantic explanation guiding the LLM on when to select this tool."
+        },
+        {
+          "name": "parametersSchema",
+          "type": "JsonNode",
+          "description": "JSON Schema specification of parameters."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "ToolDefinition(String name, String description, JsonNode parametersSchema)",
+          "behavior": "Validates name formatting and non-null values."
+        }
+      ],
+      "instructionForGeneratingAgent": "Provide clean factory helpers to build tool definitions easily. Document parameter schema expectations thoroughly."
+    },
+    {
+      "className": "InferenceRequest",
+      "packageName": "com.leanllm.domain",
+      "type": "Immutable POJO",
+      "purpose": "Encapsulates an inference prompt, complete message history, active tool definitions, and sampling parameters.",
+      "whyWeNeedIt": "Decouples the conversational state from specific network protocols or vendor parameters.",
+      "securityAndEnterpriseNotes": "Enforces bounds on temperature, topP, and maxTokens to avoid API errors and cost overruns.",
+      "fieldsToImplement": [
+        {
+          "name": "modelId",
+          "type": "String",
+          "description": "Target model identifier (e.g., 'gpt-4o', 'claude-3-5-sonnet', 'llama3:8b')."
+        },
+        {
+          "name": "messages",
+          "type": "List<ChatMessage>",
+          "description": "Ordered conversational turns."
+        },
+        {
+          "name": "tools",
+          "type": "List<ToolDefinition>",
+          "description": "Available tools exposed for this turn."
+        },
+        {
+          "name": "temperature",
+          "type": "double",
+          "description": "Sampling temperature (clamped between 0.0 and 2.0)."
+        },
+        {
+          "name": "maxTokens",
+          "type": "int",
+          "description": "Max completion token limit."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "InferenceRequest(String modelId, List<ChatMessage> messages, List<ToolDefinition> tools, double temperature, int maxTokens)",
+          "behavior": "Validates boundary conditions, assigns defensive unmodifiable collections."
+        }
+      ],
+      "instructionForGeneratingAgent": "Provide a fluent Builder pattern helper for constructing complex inference requests cleanly."
+    },
+    {
+      "className": "InferenceResponse",
+      "packageName": "com.leanllm.domain",
+      "type": "Immutable POJO",
+      "purpose": "Standardized output structure capturing text response, tool calls, and token metrics.",
+      "whyWeNeedIt": "Normalizes differences between provider responses into a single predictable type.",
+      "securityAndEnterpriseNotes": "Includes token usage metrics for cost management and runaway loop prevention.",
+      "fieldsToImplement": [
+        {
+          "name": "replyMessage",
+          "type": "ChatMessage",
+          "description": "Generated assistant message."
+        },
+        {
+          "name": "finishReason",
+          "type": "String",
+          "description": "Reason for generation completion ('stop', 'tool_calls', 'length')."
+        },
+        {
+          "name": "promptTokens",
+          "type": "long",
+          "description": "Count of tokens consumed in prompt."
+        },
+        {
+          "name": "completionTokens",
+          "type": "long",
+          "description": "Count of tokens generated in completion."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "boolean hasToolCalls()",
+          "behavior": "Returns true if replyMessage contains one or more ToolCalls."
+        },
+        {
+          "signature": "List<ToolCall> getToolCalls()",
+          "behavior": "Convenience method delegating to replyMessage.toolCalls()."
+        }
+      ],
+      "instructionForGeneratingAgent": "Document how the agent loop uses finishReason to branch between returning text to the user or executing tools."
+    },
+    {
+      "className": "LlmClient",
+      "packageName": "com.leanllm.client",
+      "type": "Interface",
+      "purpose": "Primary operational contract for all LLM providers.",
+      "whyWeNeedIt": "Allows the AgentEngine to operate seamlessly across local daemons (Ollama, llama.cpp) and remote clouds (OpenAI, Anthropic, Mistral).",
+      "securityAndEnterpriseNotes": "Throws explicit checked domain exceptions (InferenceException) rather than raw runtime errors.",
+      "fieldsToImplement": [],
+      "methodsToImplement": [
+        {
+          "signature": "InferenceResponse complete(InferenceRequest request) throws InferenceException",
+          "behavior": "Executes synchronous inference."
+        },
+        {
+          "signature": "void stream(InferenceRequest request, StreamConsumer consumer) throws InferenceException",
+          "behavior": "Initiates streaming inference, passing token chunks to the consumer."
+        },
+        {
+          "signature": "boolean isHealthy()",
+          "behavior": "Performs quick ping or health check to verify backend reachability."
+        }
+      ],
+      "instructionForGeneratingAgent": "Ensure comprehensive documentation on streaming backpressure, error propagation, and connection recovery."
+    },
+    {
+      "className": "StreamConsumer",
+      "packageName": "com.leanllm.client",
+      "type": "Functional Interface",
+      "purpose": "Callback handler receiving streaming token fragments and status events in real time.",
+      "whyWeNeedIt": "Allows immediate streaming of tokens directly to the UI (JavaFX or Terminal) without waiting for completion.",
+      "securityAndEnterpriseNotes": "Must handle rapid event firing safely without blocking the network thread.",
+      "fieldsToImplement": [],
+      "methodsToImplement": [
+        {
+          "signature": "void onToken(String tokenDelta)",
+          "behavior": "Invoked whenever a new partial token arrives."
+        },
+        {
+          "signature": "void onError(Throwable error)",
+          "behavior": "Invoked when a streaming connection breaks or fails."
+        },
+        {
+          "signature": "void onComplete(InferenceResponse finalResponse)",
+          "behavior": "Invoked when the stream concludes and final metadata is assembled."
+        }
+      ],
+      "instructionForGeneratingAgent": "Annotate as @FunctionalInterface or multi-method listener. Detail expected thread context in Javadoc."
+    },
+    {
+      "className": "AbstractHttpLlmClient",
+      "packageName": "com.leanllm.client.http",
+      "type": "Abstract POJO",
+      "purpose": "Foundation for HTTP-based inference backends built on standard java.net.http.HttpClient.",
+      "whyWeNeedIt": "Manages connection pooling, HTTP/2 upgrades, request dispatching, and Server-Sent Event (SSE) stream parsing with zero external libraries.",
+      "securityAndEnterpriseNotes": "Enforces TLS 1.3 for remote calls, sets strict connect and read timeouts, and scrubs credentials.",
+      "fieldsToImplement": [
+        {
+          "name": "endpoint",
+          "type": "URI",
+          "description": "Target endpoint URI."
+        },
+        {
+          "name": "credentials",
+          "type": "SecureSecret",
+          "description": "Optional API key holder (null for unauthenticated local endpoints)."
+        },
+        {
+          "name": "httpClient",
+          "type": "HttpClient",
+          "description": "Internal standard JDK HTTP/2 client."
+        },
+        {
+          "name": "timeout",
+          "type": "Duration",
+          "description": "Max duration permitted for network round trips."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "protected HttpResponse<String> postJson(String body) throws Exception",
+          "behavior": "Dispatches POST request with appropriate headers and credentials."
+        },
+        {
+          "signature": "protected void parseServerSentEvents(InputStream stream, StreamConsumer consumer)",
+          "behavior": "Parses 'data: {...}' SSE lines, converts to token deltas, and dispatches to consumer."
+        }
+      ],
+      "instructionForGeneratingAgent": "Explain zero-dependency SSE parsing logic in detail using standard BufferedReader line inspection."
+    },
+    {
+      "className": "CloudLlmClient",
+      "packageName": "com.leanllm.client.cloud",
+      "type": "Concrete POJO",
+      "purpose": "Specialized HTTP client targeting OpenAI-compatible and enterprise cloud REST endpoints.",
+      "whyWeNeedIt": "Connects to commercial cloud models using authorization headers and standard payload formatting.",
+      "securityAndEnterpriseNotes": "Injects authorization headers directly from SecureSecret without logging sensitive keys.",
+      "fieldsToImplement": [
+        {
+          "name": "customHeaders",
+          "type": "Map<String, String>",
+          "description": "Provider-specific headers (e.g., Anthropic version tags, organization IDs)."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "CloudLlmClient(URI endpoint, SecureSecret apiKey, Duration timeout, Map<String, String> headers)",
+          "behavior": "Initializes base HTTP client with cloud-specific configuration."
+        },
+        {
+          "signature": "InferenceResponse complete(InferenceRequest request)",
+          "behavior": "Serializes request to JSON, executes POST, parses response, and returns normalized InferenceResponse."
+        }
+      ],
+      "instructionForGeneratingAgent": "Include instructions on transforming domain ChatMessage collections into the OpenAI-compatible JSON format."
+    },
+    {
+      "className": "LocalLlmClient",
+      "packageName": "com.leanllm.client.local",
+      "type": "Concrete POJO",
+      "purpose": "Specialized HTTP client targeting local daemons (Ollama, llama.cpp server, LocalAI) on loopback addresses.",
+      "whyWeNeedIt": "Allows totally private, offline LLM inference without requiring external network connectivity.",
+      "securityAndEnterpriseNotes": "Strictly validates that the target URI resolves to a loopback address (127.0.0.1, [::1], localhost) to prevent Server-Side Request Forgery (SSRF).",
+      "fieldsToImplement": [
+        {
+          "name": "keepAlive",
+          "type": "String",
+          "description": "Instructs local engines how long to keep models loaded in VRAM."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "LocalLlmClient(URI loopbackUri, Duration timeout)",
+          "behavior": "Validates loopback constraints and instantiates client."
+        },
+        {
+          "signature": "private static void assertLoopback(URI uri)",
+          "behavior": "Verifies host name matches localhost, 127.0.0.1, or ::1; throws SecurityException otherwise."
+        }
+      ],
+      "instructionForGeneratingAgent": "Detail the security checks preventing SSRF in the class Javadoc."
+    },
+    {
+      "className": "ScriptExecutionRequest",
+      "packageName": "com.leanllm.scripting",
+      "type": "Immutable POJO",
+      "purpose": "Encapsulates the invocation contract for dynamic TypeScript or Python scripts.",
+      "whyWeNeedIt": "Provides all context (script path, CLI arguments, environment overrides, working directory, and hard timeouts) needed by sub-process runners.",
+      "securityAndEnterpriseNotes": "Verifies that script paths exist within approved sandbox directories, preventing directory traversal.",
+      "fieldsToImplement": [
+        {
+          "name": "scriptPath",
+          "type": "Path",
+          "description": "Absolute filesystem path to the target script."
+        },
+        {
+          "name": "arguments",
+          "type": "List<String>",
+          "description": "Command line argument values passed to the script."
+        },
+        {
+          "name": "environmentOverrides",
+          "type": "Map<String, String>",
+          "description": "Specific environment variables provided to the child process."
+        },
+        {
+          "name": "workingDirectory",
+          "type": "Path",
+          "description": "Working directory for execution."
+        },
+        {
+          "name": "timeout",
+          "type": "Duration",
+          "description": "Maximum execution duration before forced termination."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "ScriptExecutionRequest(Path scriptPath, List<String> arguments, Map<String, String> environmentOverrides, Path workingDirectory, Duration timeout)",
+          "behavior": "Defensively validates arguments and ensures non-null values."
+        }
+      ],
+      "instructionForGeneratingAgent": "Emphasize argument validation to avoid command-line argument injection attacks."
+    },
+    {
+      "className": "ScriptExecutionResult",
+      "packageName": "com.leanllm.scripting",
+      "type": "Immutable POJO",
+      "purpose": "Encapsulates the outcome of an external script execution.",
+      "whyWeNeedIt": "Captures standard output, error output, return code, and execution duration for evaluation by the agent loop.",
+      "securityAndEnterpriseNotes": "Limits output capture to maximum byte size (e.g., 2MB) to prevent memory exhaustion from runaway logging.",
+      "fieldsToImplement": [
+        {
+          "name": "exitCode",
+          "type": "int",
+          "description": "Process exit status (0 indicating success)."
+        },
+        {
+          "name": "stdout",
+          "type": "String",
+          "description": "Standard output text."
+        },
+        {
+          "name": "stderr",
+          "type": "String",
+          "description": "Standard error output text."
+        },
+        {
+          "name": "executionDuration",
+          "type": "Duration",
+          "description": "Elapsed runtime."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "boolean isSuccess()",
+          "behavior": "Returns true if exitCode == 0."
+        }
+      ],
+      "instructionForGeneratingAgent": "Ensure helper methods exist for reporting human-readable summary diagnostics upon script failure."
+    },
+    {
+      "className": "AbstractProcessRunner",
+      "packageName": "com.leanllm.scripting",
+      "type": "Abstract POJO",
+      "purpose": "Zero-dependency process supervisor utilizing standard java.lang.ProcessBuilder.",
+      "whyWeNeedIt": "Executes external binaries, drains stdout/stderr concurrently in worker threads to prevent OS pipe deadlocks, and terminates hanging scripts.",
+      "securityAndEnterpriseNotes": "Does not invoke shell interpreters ('sh' or 'cmd.exe'), executing binaries directly to prevent shell injection. Clears inherited environment.",
+      "fieldsToImplement": [
+        {
+          "name": "runtimeExecutable",
+          "type": "String",
+          "description": "Path or binary name of the runtime engine (e.g., 'deno', 'bun', 'python3')."
+        },
+        {
+          "name": "sanitizer",
+          "type": "EnvironmentSanitizer",
+          "description": "Sanitizer filtering process environment blocks."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "ScriptExecutionResult execute(ScriptExecutionRequest request) throws Exception",
+          "behavior": "Builds command, configures ProcessBuilder, launches process, drains streams asynchronously, enforces timeout, and returns result."
+        },
+        {
+          "signature": "private CompletableFuture<String> readStreamAsync(InputStream is)",
+          "behavior": "Reads stream asynchronously on virtual or daemon threads to prevent deadlocks."
+        }
+      ],
+      "instructionForGeneratingAgent": "Detail the asynchronous stream reading pattern in Javadoc, explaining why synchronous reading causes buffer deadlocks."
+    },
+    {
+      "className": "TypeScriptRunner",
+      "packageName": "com.leanllm.scripting.ts",
+      "type": "Concrete POJO",
+      "purpose": "Process runner specialized for dynamic TypeScript execution via modern engines (Deno, Bun, or ts-node).",
+      "whyWeNeedIt": "Enables the agent to execute fast, typed scripts on demand without ahead-of-time compilation.",
+      "securityAndEnterpriseNotes": "Can automatically inject runtime permission flags (e.g., Deno '--deny-net', '--deny-read' sandbox flags).",
+      "fieldsToImplement": [
+        {
+          "name": "engineType",
+          "type": "String",
+          "description": "Identifies runner as 'deno', 'bun', or 'ts-node'."
+        },
+        {
+          "name": "sandboxFlags",
+          "type": "List<String>",
+          "description": "Security flags appended before script arguments."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "TypeScriptRunner(String binaryPath, List<String> sandboxFlags)",
+          "behavior": "Initializes runner with target runtime and security flags."
+        }
+      ],
+      "instructionForGeneratingAgent": "Document how Deno sandboxing parameters provide superior isolation for untrusted agent-generated code."
+    },
+    {
+      "className": "PythonRunner",
+      "packageName": "com.leanllm.scripting.python",
+      "type": "Concrete POJO",
+      "purpose": "Process runner specialized for dynamic Python execution via python3 or dedicated virtual environments.",
+      "whyWeNeedIt": "Allows the agent to delegate complex mathematical calculation, data processing, and ML scripts to the Python ecosystem.",
+      "securityAndEnterpriseNotes": "Passes flags to disable bytecode writing ('-B') and unbuffered output ('-u') for real-time stream tracking.",
+      "fieldsToImplement": [
+        {
+          "name": "pythonBinaryPath",
+          "type": "Path",
+          "description": "Explicit path to python interpreter (allowing venv isolation)."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "PythonRunner(Path pythonBinaryPath)",
+          "behavior": "Initializes runner, validating binary executable permissions."
+        }
+      ],
+      "instructionForGeneratingAgent": "Document the isolation advantages of pointing pythonBinaryPath to an ephemeral virtual environment (venv)."
+    },
+    {
+      "className": "Tool",
+      "packageName": "com.leanllm.agent",
+      "type": "Interface",
+      "purpose": "Executable interface defining an action the agent can invoke.",
+      "whyWeNeedIt": "Connects declarative ToolDefinition schemas to real execution routines (Java methods, TypeScript scripts, or Python scripts).",
+      "securityAndEnterpriseNotes": "Execution is wrapped with try-catch blocks in the engine so tool failures result in error messages fed back to the LLM rather than system crashes.",
+      "fieldsToImplement": [],
+      "methodsToImplement": [
+        {
+          "signature": "ToolDefinition getDefinition()",
+          "behavior": "Returns declaration metadata and parameter schema."
+        },
+        {
+          "signature": "String execute(String rawArgumentsJson) throws Exception",
+          "behavior": "Executes logic against input arguments and returns string result to feed to LLM."
+        }
+      ],
+      "instructionForGeneratingAgent": "Emphasize clean separation between tool specification and runtime execution in the Javadoc."
+    },
+    {
+      "className": "ScriptDelegatingTool",
+      "packageName": "com.leanllm.agent",
+      "type": "Concrete POJO",
+      "purpose": "Bridge tool that delegates LLM tool invocations directly to a TypeScript or Python script.",
+      "whyWeNeedIt": "Allows developers to add new agent capabilities by writing a standalone script without recompiling or redeploying the Java engine.",
+      "securityAndEnterpriseNotes": "Applies strict execution timeouts and sanitizes input arguments.",
+      "fieldsToImplement": [
+        {
+          "name": "definition",
+          "type": "ToolDefinition",
+          "description": "Tool schema and metadata."
+        },
+        {
+          "name": "runner",
+          "type": "AbstractProcessRunner",
+          "description": "Configured script runner."
+        },
+        {
+          "name": "scriptPath",
+          "type": "Path",
+          "description": "Path to target script."
+        },
+        {
+          "name": "timeout",
+          "type": "Duration",
+          "description": "Execution timeout limit."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "String execute(String rawArgumentsJson)",
+          "behavior": "Packages JSON into ScriptExecutionRequest, executes runner, and returns stdout or formatted error."
+        }
+      ],
+      "instructionForGeneratingAgent": "Document how dynamic script tools facilitate modular updates in enterprise deployments."
+    },
+    {
+      "className": "AgentContext",
+      "packageName": "com.leanllm.agent",
+      "type": "Stateful POJO",
+      "purpose": "Maintains conversation history, iteration counters, active tool references, and runtime guardrails for an active session.",
+      "whyWeNeedIt": "Preserves state across multi-turn reasoning loops and prevents infinite recursion.",
+      "securityAndEnterpriseNotes": "Thread-safe. Enforces hard maximum iteration limits (e.g., 10 turns) to prevent runaway billing or endless loops.",
+      "fieldsToImplement": [
+        {
+          "name": "conversationHistory",
+          "type": "List<ChatMessage>",
+          "description": "Accumulated messages in active session."
+        },
+        {
+          "name": "maxIterations",
+          "type": "int",
+          "description": "Safety threshold on ReAct cycles."
+        },
+        {
+          "name": "currentIteration",
+          "type": "int",
+          "description": "Counter of executed cycles."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "synchronized void appendMessage(ChatMessage msg)",
+          "behavior": "Adds message to history."
+        },
+        {
+          "signature": "synchronized boolean canIterate()",
+          "behavior": "Returns true if currentIteration < maxIterations."
+        },
+        {
+          "signature": "synchronized void advanceIteration()",
+          "behavior": "Increments iteration count or throws MaxIterationsExceededException."
+        },
+        {
+          "signature": "synchronized List<ChatMessage> getSnapshot()",
+          "behavior": "Returns unmodifiable defensive copy of conversation history."
+        }
+      ],
+      "instructionForGeneratingAgent": "Explain loop safety mechanics and synchronization requirements in Javadoc."
+    },
+    {
+      "className": "AgentEngine",
+      "packageName": "com.leanllm.agent",
+      "type": "Concrete POJO",
+      "purpose": "Primary orchestrator executing the ReAct (Reasoning and Acting) loop.",
+      "whyWeNeedIt": "Drives the cognitive loop: prompts model, detects tool calls, executes registered tools, feeds results back to model, and recurses until final user response is ready.",
+      "securityAndEnterpriseNotes": "Contains defensive error trapping so broken tools or network drops are gracefully converted into conversational error context.",
+      "fieldsToImplement": [
+        {
+          "name": "client",
+          "type": "LlmClient",
+          "description": "Inference backend."
+        },
+        {
+          "name": "modelId",
+          "type": "String",
+          "description": "Identifier of the LLM to run."
+        },
+        {
+          "name": "registeredTools",
+          "type": "Map<String, Tool>",
+          "description": "Active tool registry indexed by name."
+        },
+        {
+          "name": "uiBridge",
+          "type": "UiBridge",
+          "description": "Presentation bridge for status and token streaming."
+        }
+      ],
+      "methodsToImplement": [
+        {
+          "signature": "void registerTool(Tool tool)",
+          "behavior": "Registers tool in internal map."
+        },
+        {
+          "signature": "String run(AgentContext context, String userQuery) throws Exception",
+          "behavior": "Executes ReAct cycle until final assistant message is generated, notifying uiBridge throughout."
+        }
+      ],
+      "instructionForGeneratingAgent": "Document the complete ReAct cycle (Observation -> Thought -> Action -> Observation) in the class Javadoc."
+    },
+    {
+      "className": "UiBridge",
+      "packageName": "com.leanllm.ui",
+      "type": "Interface",
+      "purpose": "Event-driven decoupling interface connecting the core agent engine to any user interface.",
+      "whyWeNeedIt": "Permits plugging in JavaFX desktop interfaces, web UI WebSockets, or command-line interfaces without coupling the core engine to UI libraries.",
+      "securityAndEnterpriseNotes": "Methods must be non-blocking to prevent UI rendering pauses from stalling the agent loop.",
+      "fieldsToImplement": [],
+      "methodsToImplement": [
+        {
+          "signature": "void onStatusChanged(String statusText)",
+          "behavior": "Notifies UI of state changes (e.g., 'Thinking...', 'Executing script: calc.py')."
+        },
+        {
+          "signature": "void onTokenReceived(String token)",
+          "behavior": "Sends streaming token fragments directly to the UI view."
+        },
+        {
+          "signature": "void onToolExecutionStarted(String toolName, String argumentsJson)",
+          "behavior": "Alerts UI that a tool is being invoked."
+        },
+        {
+          "signature": "void onToolExecutionFinished(String toolName, String outputResult)",
+          "behavior": "Alerts UI that tool execution completed."
+        },
+        {
+          "signature": "void onError(String errorMessage, Throwable cause)",
+          "behavior": "Passes formatted errors to UI."
+        }
+      ],
+      "instructionForGeneratingAgent": "Ensure full explanation of how a JavaFX Platform.runLater wrapper or headless CLI can implement this contract cleanly."
+    },
+    {
+      "className": "LlmClientFactory",
+      "packageName": "com.leanllm.factory",
+      "type": "Factory POJO",
+      "purpose": "Dynamic factory instantiating configured LlmClient implementations.",
+      "whyWeNeedIt": "Encapsulates configuration parsing, endpoint routing, credential verification, and client instantiation logic.",
+      "securityAndEnterpriseNotes": "Validates API keys and endpoints before returning client instances.",
+      "fieldsToImplement": [],
+      "methodsToImplement": [
+        {
+          "signature": "static LlmClient createLocalClient(URI localEndpoint, Duration timeout)",
+          "behavior": "Instantiates and validates a LocalLlmClient."
+        },
+        {
+          "signature": "static LlmClient createCloudClient(URI cloudEndpoint, SecureSecret apiKey, Duration timeout)",
+          "behavior": "Instantiates and validates a CloudLlmClient."
+        }
+      ],
+      "instructionForGeneratingAgent": "Detail factory design pattern benefits and credential isolation guarantees in Javadoc."
+    },
+    {
+      "className": "ScriptRunnerFactory",
+      "packageName": "com.leanllm.factory",
+      "type": "Factory POJO",
+      "purpose": "Dynamic factory instantiating TypeScript and Python script runners based on host system capabilities.",
+      "whyWeNeedIt": "Auto-detects available local binaries (detecting whether Deno, Bun, or Node is installed; locating python3 in PATH or venv).",
+      "securityAndEnterpriseNotes": "Verifies execution bits and absolute path integrity on detected binaries.",
+      "fieldsToImplement": [],
+      "methodsToImplement": [
+        {
+          "signature": "static TypeScriptRunner createTypeScriptRunner()",
+          "behavior": "Inspects system for Deno, Bun, or ts-node and returns configured runner."
+        },
+        {
+          "signature": "static PythonRunner createPythonRunner(Path optionalVenvPath)",
+          "behavior": "Resolves python binary from virtual environment or system PATH."
+        }
+      ],
+      "instructionForGeneratingAgent": "Document discovery fallback chains (e.g., Deno -> Bun -> ts-node) in Javadoc."
+    }
+  ],
+  "implementationRoadmap": [
+    {
+      "phase": 1,
+      "name": "Security and Protocol Primitives",
+      "task": "Generate SecureSecret, EnvironmentSanitizer, JsonNode, and JsonParser. Ensure 100% test coverage and memory scrubbing verification."
+    },
+    {
+      "phase": 2,
+      "name": "Domain Models and Client Transport",
+      "task": "Generate ChatMessage, ToolCall, ToolDefinition, InferenceRequest, InferenceResponse, StreamConsumer, LlmClient, AbstractHttpLlmClient, CloudLlmClient, and LocalLlmClient."
+    },
+    {
+      "phase": 3,
+      "name": "Scripting Sub-Process Framework",
+      "task": "Generate ScriptExecutionRequest, ScriptExecutionResult, AbstractProcessRunner, TypeScriptRunner, and PythonRunner with asynchronous stream readers."
+    },
+    {
+      "phase": 4,
+      "name": "Agentic ReAct Core and UI Bridge",
+      "task": "Generate Tool, ScriptDelegatingTool, AgentContext, AgentEngine, and UiBridge."
+    },
+    {
+      "phase": 5,
+      "name": "Dynamic Factories and System Bootstrap",
+      "task": "Generate LlmClientFactory and ScriptRunnerFactory, completing the fully compilable POJO backend."
+    }
+  ]
+}

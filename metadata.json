@@ -1,0 +1,8 @@
+{
+  "name": "Lean Java Agentic Core (LJAC) - Technical Architecture & Roadmap",
+  "description": "Comprehensive technical architecture, 5-phase roadmap, 26-POJO code inspector, and Obsidian wiki knowledge graph for the Zero-Dependency Lean Java Agentic Core.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

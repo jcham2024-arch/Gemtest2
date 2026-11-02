@@ -1,0 +1,309 @@
+{
+  "metadata": {
+    "generated": "2026-11",
+    "source_documents": [
+      "PROJECT-STATUS.md",
+      "README.md",
+      "ROADMAP.md",
+      "STANDARDS.md",
+      "STRUCTURE.md",
+      "INVARIANTS.md",
+      "AGENT_RULES.md"
+    ],
+    "scope": "Review of Apex Agent Management Chat architecture against 2025–2026 ecosystem evidence"
+  },
+
+  "summary": "The Apex kernel plane is architecturally sound and ahead of most Java agent platforms: the typed records, nine-port separation, realpath jail, process-tree terminator, and CAS evolution plane are validated by current research. However, seven gaps require action before the phases that depend on them: (1) the Embabel exclusion now duplicates a GA framework's core thesis without a benchmark; (2) JDK 21 virtual-thread pinning is a concrete starvation hazard for the SSE/HITL workload; (3) the self-improvement gate cannot detect removal of redundant safeguards (Masked Erosion); (4) the MCP layer treats tool descriptors as trusted despite a cross-language RCE CVE in the official SDK; (5) Tauri 2.0 has a recurring origin-confusion CVE pattern; (6) Spring AI 1.0.1's streaming path silently falls back to non-streaming at every tool call; and (7) the vector-only memory router will hit the multi-hop ceiling. Each gap is addressable within the existing phase-gate structure.",
+
+  "learnings": [
+    {
+      "id": "L1",
+      "topic": "Deterministic kernel + CAS evolution plane",
+      "insight": "The split between an immutable kernel with no write path to its own behavior and a versioned CAS evolution plane behind a sentinel gate is the correct architecture. The strongest formulation in the 2026 literature is the falsifiable release gate: a frozen, conjunctive gate that never moves during a run, because safety claims on self-improving runtimes are 'almost always self-graded: a policy file, a guardrail, or a README commitment'.",
+      "relevance": "Validates the core Apex thesis. Keep the kernel and the sentinel structure; the gap is in what the sentinel measures (see I3).",
+      "references": [
+        "Falsifiable Release Gates for Self-Improving Systems, arXiv:2607.13070 (2026-07-11) "
+      ]
+    },
+    {
+      "id": "L2",
+      "topic": "Content-addressed prompt versioning",
+      "insight": "Storing resolved system prompts and agent configurations as content-addressed blobs—unchanged prompts never re-stored, the store growing only with distinct versions—is an independently documented production pattern for prompt governance.",
+      "relevance": "The CAS design is not speculative. It matches what teams are building for auditable agent configuration.",
+      "references": [
+        "CAS prompt versioning pattern (2026) [reference:1]"
+      ]
+    },
+    {
+      "id": "L3",
+      "topic": "LangChain4j as Tier 2 adapter",
+      "insight": "LangChain4j 1.x supports per-request MCP clients and dynamic tool filtering by tenant/user role, which is materially relevant to Apex's multi-tenancy requirement.",
+      "relevance": "The Tier 2 adapter choice is defensible. The per-request MCP client scope is the mechanism that prevents cross-tenant tool leakage.",
+      "references": [
+        "LangChain4j MCP dynamic client/filter management and tenant-based tool filtering [reference:3]"
+      ]
+    },
+    {
+      "id": "L4",
+      "topic": "TypeScript/Java isomorphism gate",
+      "insight": "Enforcing `git diff --exit-code` on generated OpenAPI types is a cheap, high-value invariant that most agent platforms lack entirely.",
+      "relevance": "Keep C1 exactly as written. It is a structural advantage.",
+      "references": []
+    },
+    {
+      "id": "L5",
+      "topic": "Concrete prohibition list",
+      "insight": "Banning `Runtime.exec(String)`, `defineClass`, `ScopedValue`, and mutable collections in records targets the exact mechanisms by which agent platforms leak execution surface.",
+      "relevance": "The prohibition list is unusually concrete and testable. Preserve it verbatim.",
+      "references": []
+    }
+  ],
+
+  "issues": [
+    {
+      "id": "I1",
+      "severity": "medium",
+      "title": "Embabel exclusion now duplicates a GA framework's core thesis without a benchmark",
+      "description": "The ADR states 'Embabel is NOT used — planner is reimplemented natively so the core stays Android-capable.' Embabel reached 1.0 GA in July 2026 with exactly the thesis Apex's native planner implements: Goal-Oriented Action Planning (GOAP) with a deterministic planner that is 'not another LLM call,' producing explainability and predictability. The 660-LOC AStarPlanner now reimplements the core of a GA framework. The Android-capability rationale is insufficient: Embabel is a JVM framework, not a Spring-only one, and its planning layer does not require Spring AI at runtime.",
+      "evidence": "Embabel 1.0 GA (July 20, 2026) uses GOAP and models agentic flows with actions, goals, conditions, and OODA replanning. The planner is deterministic code, not an LLM call [reference:4][reference:5]. Embabel supports mixing GOAP planning with explicit state machines [reference:6].",
+      "affected_components": ["engine-planner", "ADR (Embabel exclusion)", "S2.2"],
+      "references": [
+        "Embabel Overview and Architecture, ronveen.com (2026-09-23) [reference:7]",
+        "InfoQ: Embabel Agent Framework Reaches 1.0 (2026-08-03) [reference:8]"
+      ]
+    },
+    {
+      "id": "I2",
+      "severity": "high",
+      "title": "JDK 21 virtual-thread pinning is a concrete starvation hazard for the SSE/HITL workload",
+      "description": "STANDARDS.md mandates `Executors.newVirtualThreadPerTaskExecutor()` for all agent I/O. On JDK 21, a virtual thread that blocks inside a `synchronized` block or method is pinned to its carrier and cannot unmount. The default carrier pool is bounded; with hundreds of long-lived SSE subscribers parked in `await()` or inside `synchronized` guards, the scheduler can be starved. The fix is not to abandon virtual threads but to mandate `ReentrantLock`/`Condition` instead of `synchronized`/`Object.wait` on any code path running on the agent executor, and to add a concurrency test.",
+      "evidence": "For Java 21–23, 'when code is executed inside a `synchronized` block or method, the virtual thread remains pinned to its underlying OS thread and cannot be unmounted during a blocking operation' [reference:9]. The limitation is removed in Java 24+ [reference:10], but Apex targets Java 21.",
+      "affected_components": ["kernel.agent", "kernel.web", "STANDARDS.md §Virtual threads", "INVARIANTS.md (missing K8)"],
+      "references": [
+        "Sonar rule S6906: virtual-thread pinning on Java <24 [reference:11]",
+        "StackOverflow: pinning gone in Java 24+, limitation in 21–23 [reference:12]",
+        "GitHub: replace `synchronized` with `ReentrantLock` "
+      ]
+    },
+    {
+      "id": "I3",
+      "severity": "high",
+      "title": "Self-improvement gate cannot detect removal of redundant safeguards (Masked Erosion)",
+      "description": "The S5 flywheel assumes the sentinel is the safety boundary. The Masked Erosion result shows the failure mode: when guardrails overlap, deleting one redundant protection is masked because the others still block the harm, so an acceptance gate that scores on task success alone approves the deletion and defense-in-depth silently erodes. The Apex regression category (replay last 20 messages, no new guardrail trips) detects performance regression but not removed protections. The sentinel must assert that the set of active guardrail IDs and capability classes is not reduced without an explicit operator grant.",
+      "evidence": "In 411 improvement loops across ten gate rules, 'a deletion behind another working safeguard adds almost no observable harm' and the gate 'decides on task success alone and redundancy erodes unseen' [reference:14]. Larger evaluation batches made the problem worse: 40-task batches lost all six safeguards while 20-task batches kept every harness protected [reference:15].",
+      "affected_components": ["evolution-sentinel", "S5 flywheel", "INVARIANTS.md E-series"],
+      "references": [
+        "Masked Erosion: How Acceptance Gates Lose Redundant Safeguards in Self-Improving Agents, arXiv:2610.38392 (2026-10-28) [reference:16]"
+      ]
+    },
+    {
+      "id": "I4",
+      "severity": "critical",
+      "title": "MCP layer treats tool descriptors as trusted despite a cross-language RCE CVE in the official SDK",
+      "description": "The P6 plan wires McpToolProvider over STDIO and Streamable HTTP. In April 2026, OX Security disclosed a 'by design' command-injection flaw in Anthropic's official MCP SDKs across Python, TypeScript, Java, and Rust: the STDIO configuration path lets an attacker run arbitrary OS commands, and if the command happens to start a STDIO server, the handle is returned. The official SDK has no built-in sandbox. Apex's RealPathJail and BinaryAllowList live in the process executor, not in the MCP transport. MCP tool descriptors must be validated against the tenant's capability grant before the client is instantiated.",
+      "evidence": "'The systemic vulnerability is baked into Anthropic's official MCP SDK across any supported language, including Python, TypeScript, Java, and Rust' [reference:17]. At least 10 CVEs were assigned, affecting more than 150 million downloads and ~200,000 publicly reachable servers [reference:18][reference:19].",
+      "affected_components": ["plugin-mcp", "kernel.rules", "S6", "INVARIANTS.md (missing MCP descriptor test)"],
+      "references": [
+        "The Hacker News: Anthropic MCP Design Vulnerability Enables RCE (2026-04-20) [reference:20]",
+        "Cloud Security Alliance: By-Design RCE in the MCP SDK (2026-04-22) [reference:21]",
+        "OX Security disclosure, 10+ CVEs [reference:22]"
+      ]
+    },
+    {
+      "id": "I5",
+      "severity": "high",
+      "title": "Tauri 2.0 has a recurring origin-confusion CVE pattern at the client boundary",
+      "description": "CVE-2026-42184 (CVSS 8.8) shows Tauri's `is_local_url()` misclassifying remote URLs as trusted local origins on Windows and Android because it checked only the first subdomain label, so `http://tauri.evil.com` was treated as local. This is a recurring source of CVEs in the same function. The Apex client renders streaming agent output and HITL diffs—exactly the content that can carry injected markup. The webview CSP must exclude `data:` and `blob:` from `script-src`, and the SSE client must sanitize agent-authored content before rendering.",
+      "evidence": "Tauri 2.11.1 is 'the first release that validates the full Origin header before granting local-IPC trust on Windows and Android (was checking only the first label, allowing http://tauri.evil.com to be misclassified as local)' [reference:23]. Affected versions are 2.0 through 2.11.0 [reference:24].",
+      "affected_components": ["client/src-tauri", "S7/P7", "S8/P8", "INVARIANTS.md C-series"],
+      "references": [
+        "CVE-2026-42184 fix commit, requiring Tauri >=2.11.1 [reference:25]",
+        "Snyk: `is_local_url` SSRF via first-label matching [reference:26]",
+        "NVD: affected 2.0 to 2.11.0 [reference:27]"
+      ]
+    },
+    {
+      "id": "I6",
+      "severity": "medium",
+      "title": "Spring AI 1.0.1 streaming path silently falls back to non-streaming at every tool call",
+      "description": "Spring AI 1.0.1's `.stream()` path does not execute tool callbacks; it only streams text chunks. When the model returns tool calls mid-stream, Spring AI internally falls back to a non-streaming call, receives the tool result, then resumes streaming. The Apex SSE `WireEvent` projection will observe a latency spike and a potential ordering anomaly at every tool boundary. The P6 exit criterion ('stream renders both messages') does not test this fallback path.",
+      "evidence": "'In Spring AI 1.0.1, the `.stream()` path does not execute tool callbacks — it only streams text chunks. When the model returns tool_calls in the stream, they're captured as AG-UI events but the actual Java tool functions are never invoked' [reference:28]. 'Streaming 모드에서 tool 호출이 발생하면, Spring AI 는 내부적으로 한 번 non-streaming 으로 fall back 해 tool 결과를 받은 뒤, 그 결과를 다시 streaming 호출로 보낸다' [reference:29].",
+      "affected_components": ["kernel-agent", "kernel.web", "S6/P6", "INVARIANTS.md (missing stream-tool ordering test)"],
+      "references": [
+        "CopilotKit PR #4475: Spring AI `.stream()` does not execute tool callbacks [reference:30]",
+        "Notion note: non-streaming fallback at tool boundary [reference:31]"
+      ]
+    },
+    {
+      "id": "I7",
+      "severity": "medium",
+      "title": "Vector-only memory router will hit the multi-hop ceiling",
+      "description": "S4 plans a VectorStorePort but no graph layer. The 2026 consensus is that vector RAG fails as agent memory for multi-hop relational queries: it retrieves by proximity, not structure, and cannot represent edges between 'User A approved Budget V2' and 'Budget V2 replaced Budget V1 after Agent B's objection.' The production default is hybrid: vectors find entry points, the graph expands from them, with the graph as source of truth and embeddings as an index.",
+      "evidence": "Lettria benchmarked graph-structured RAG against vector-only across four corpora and reported correctness improving from roughly 50% to above 80% [reference:32]. 'Vector search wins on single-fact lookups. Graph wins on everything else' [reference:33]. 'Multi-hop accuracy collapse' is the first named failure mode [reference:34].",
+      "affected_components": ["S4 memory router", "VectorStorePort", "ROADMAP S4"],
+      "references": [
+        "FalkorDB: AI Agent Memory — Why Retrieval Architecture Is the Real Problem (2026-08-15) [reference:35]",
+        "GraphRAG: vector for semantic discovery + graph for relational context [reference:36]"
+      ]
+    }
+  ],
+
+  "remediation": [
+    {
+      "issue_id": "I1",
+      "priority": "medium",
+      "steps": [
+        "Benchmark AStarPlanner against Embabel's GOAP planner on the same task set (the S2.7 E2E task file plus at least three additional representative tasks).",
+        "Record: plan correctness, number of LLM calls avoided, wall-clock latency, and LOC maintained.",
+        "If the bespoke planner does not beat Embabel by a material margin on at least two dimensions, reopen the ADR and consider adopting Embabel's planner behind the existing PlannerPort (the port boundary makes this a non-breaking swap).",
+        "If the bespoke planner wins, document the benchmark in the ADR and add a quarterly re-evaluation trigger."
+      ],
+      "new_invariant": "None (ADR decision, not a runtime invariant)",
+      "acceptance_test": "A benchmark report committed to docs/benchmarks/ comparing AStarPlanner and Embabel GOAP on identical task files.",
+      "references": [
+        "Embabel 1.0 GA and GOAP thesis [reference:37]"
+      ]
+    },
+    {
+      "issue_id": "I2",
+      "priority": "high",
+      "steps": [
+        "Add a STANDARDS.md rule: on JDK 21, no code on the agent executor may use `synchronized` or `Object.wait`; use `ReentrantLock`/`Condition` instead.",
+        "Add a grep CI gate: zero `synchronized` blocks in `kernel.agent/**` and `kernel.web/**`.",
+        "Implement `PinningIT`: spawn 500 concurrent virtual threads that each call `Condition.await()` inside the executor and assert all complete within 5 seconds.",
+        "Document the JDK 24+ resolution so the rule can be lifted after the upgrade, and add a tracking ticket for the JDK 24 migration."
+      ],
+      "new_invariant": "K8 — No carrier pinning: no `synchronized` on the agent executor; 500 concurrent awaiting virtual threads complete within 5s on JDK 21.",
+      "acceptance_test": "`PinningIT` passes; grep CI returns zero hits in the two kernel packages.",
+      "references": [
+        "Sonar S6906: pinning on Java <24 [reference:38]",
+        "ReentrantLock preserves unmounting "
+      ]
+    },
+    {
+      "issue_id": "I3",
+      "priority": "high",
+      "steps": [
+        "Add a `protection_inventory` table (or equivalent CAS tree metadata) that records the set of active guardrail IDs and capability classes for every commit.",
+        "Modify the sentinel: before emitting `ProposalCreated`, diff the candidate's inventory against the parent's. Any reduction in guardrail IDs or capability classes is rejected unless the commit carries a signed `PermissionGrant` for that specific removal.",
+        "Do not rely on the regression replay to catch removals: a deleted redundant safeguard produces no new guardrail trips, so the replay passes.",
+        "Add a `MaskedErosionIT`: construct a commit that removes one of two overlapping path-jail checks while keeping the other; assert the sentinel rejects it."
+      ],
+      "new_invariant": "E6 — Protection inventory is monotonic: no commit may reduce the set of active guardrail IDs or capability classes without a signed operator grant.",
+      "acceptance_test": "`MaskedErosionIT` rejects a redundant-safeguard deletion; `ProtectionInventoryTest` passes for a control commit that adds a guardrail.",
+      "references": [
+        "Masked Erosion: deletion behind another safeguard is masked [reference:40]",
+        "Larger batches worsen the effect [reference:41]"
+      ]
+    },
+    {
+      "issue_id": "I4",
+      "priority": "critical",
+      "steps": [
+        "Treat every MCP tool descriptor as untrusted input. Before `McpClientFactory` instantiates a client, validate the descriptor against the tenant's `PermissionGrant`: reject absolute paths outside the workspace, `exec`/`command` fields not on the binary allow-list, and any environment variable that expands to a shell.",
+        "Pin the official MCP Java SDK to a version released after the April 2026 coordinated disclosure, and add a CI check that rejects known-vulnerable MCP SDK versions.",
+        "Add a transport-level sandbox wrapper (e.g., ZeroMCP or an equivalent allow-list proxy) between the MCP client and the OS; do not rely on RealPathJail alone, which operates at process-execution time, not at transport-configuration time.",
+        "Add `McpDescriptorIT`: a descriptor containing `exec`, an absolute path, or a shell metacharacter is rejected before `McpClientFactory` returns a client."
+      ],
+      "new_invariant": "M1 — MCP descriptors validated before client instantiation: no client is created for a descriptor that violates the tenant's capability grant or binary allow-list.",
+      "acceptance_test": "`McpDescriptorIT` rejects malicious descriptors; the MCP SDK version is pinned to a post-disclosure release.",
+      "references": [
+        "OX Security: cross-language MCP SDK command injection [reference:42]",
+        "200,000 exposed servers, 150M downloads [reference:43]",
+        "10+ CVEs assigned [reference:44]"
+      ]
+    },
+    {
+      "issue_id": "I5",
+      "priority": "high",
+      "steps": [
+        "Pin Tauri to >=2.11.1 in `client/src-tauri/Cargo.toml` and add a CI check that fails on any lower version.",
+        "Harden the CSP: `script-src` must not contain `data:` or `blob:`. Add a CI grep on `tauri.conf.json`.",
+        "Sanitize all agent-authored content (streamed tokens, tool output, HITL diffs) before rendering: strip raw HTML, disallow inline event handlers, and use a vetted sanitizer rather than string replacement.",
+        "Add a client-side test that feeds a `data:text/html,<script>` payload through the SSE rendering path and asserts the script does not execute."
+      ],
+      "new_invariant": "C5 — Tauri origin and CSP hardening: Tauri >=2.11.1; `script-src` excludes `data:` and `blob:`; agent-authored content is sanitized before render.",
+      "acceptance_test": "CI version check passes; CSP grep returns zero hits for `data:`/`blob:` in `script-src`; XSS fixture does not execute.",
+      "references": [
+        "CVE-2026-42184: Tauri >=2.11.1 required [reference:45]",
+        "`is_local_url` first-label misclassification [reference:46]"
+      ]
+    },
+    {
+      "issue_id": "I6",
+      "priority": "medium",
+      "steps": [
+        "Add a `StreamToolFallbackIT` fixture: start a streaming response, inject a tool call mid-stream, and assert that the SSE `WireEvent` sequence remains monotonic (no duplicated chunk, no out-of-order event) across the non-streaming fallback.",
+        "In the SSE projection layer, mark the tool-boundary transition explicitly so the client can render a 'tool executing' state instead of a stalled stream.",
+        "If the latency spike is unacceptable for the product, adopt the two-phase pattern from the CopilotKit fix: stream text with `.stream()` without tool callbacks, detect tool intent, then re-invoke with `.call()` with tool callbacks [reference:47]."
+      ],
+      "new_invariant": "C6 — Streaming tool-boundary ordering: SSE sequence is monotonic and duplicate-free across a mid-stream tool call.",
+      "acceptance_test": "`StreamToolFallbackIT` passes with a forced tool-call fixture.",
+      "references": [
+        "Spring AI `.stream()` does not execute tool callbacks [reference:48]",
+        "Non-streaming fallback at tool boundary [reference:49]",
+        "Two-phase stream+call pattern [reference:50]"
+      ]
+    },
+    {
+      "issue_id": "I7",
+      "priority": "medium",
+      "steps": [
+        "Add a `GraphStorePort` alongside `VectorStorePort` in S4, or explicitly document the multi-hop limitation as a v1 non-goal in the ROADMAP and README.",
+        "If adding the port: implement hybrid routing—vector search for entry points, graph traversal for relational expansion—with the graph as source of truth.",
+        "Add a `MultiHopMemoryIT`: a query requiring two relational hops (e.g., 'which budget replaced the one Agent B objected to?') must return the correct connected facts; vector-only must fail this fixture, hybrid must pass."
+      ],
+      "new_invariant": "M2 — Hybrid retrieval preserves multi-hop recall: a two-hop relational query returns the correct connected facts; vector-only is insufficient for this fixture.",
+      "acceptance_test": "`MultiHopMemoryIT` passes with hybrid routing and fails with vector-only.",
+      "references": [
+        "Vector RAG fails on multi-hop; hybrid is production default [reference:51]",
+        "GraphRAG wins on relational queries [reference:52]"
+      ]
+    }
+  ],
+
+  "invariant_additions": [
+    {
+      "id": "K8",
+      "title": "No carrier pinning on the agent executor",
+      "description": "On JDK 21, no code running on the agent executor may use `synchronized` or `Object.wait`; use `ReentrantLock`/`Condition`. 500 concurrent awaiting virtual threads complete within 5 seconds.",
+      "test": "`PinningIT` + grep CI on `kernel.agent/**` and `kernel.web/**`",
+      "references": ["Sonar S6906 [reference:53]"]
+    },
+    {
+      "id": "E6",
+      "title": "Protection inventory monotonicity",
+      "description": "No commit may reduce the set of active guardrail IDs or capability classes without a signed operator grant.",
+      "test": "`MaskedErosionIT` + `ProtectionInventoryTest`",
+      "references": ["Masked Erosion [reference:54]"]
+    },
+    {
+      "id": "M1",
+      "title": "MCP descriptor validation before client instantiation",
+      "description": "No MCP client is created for a descriptor that violates the tenant's capability grant or binary allow-list.",
+      "test": "`McpDescriptorIT`",
+      "references": ["OX Security MCP RCE [reference:55]"]
+    },
+    {
+      "id": "C5",
+      "title": "Tauri origin and CSP hardening",
+      "description": "Tauri >=2.11.1; `script-src` excludes `data:` and `blob:`; agent-authored content sanitized before render.",
+      "test": "CI version check + CSP grep + XSS fixture",
+      "references": ["CVE-2026-42184 [reference:56]"]
+    },
+    {
+      "id": "C6",
+      "title": "Streaming tool-boundary ordering",
+      "description": "SSE sequence is monotonic and duplicate-free across a mid-stream tool call.",
+      "test": "`StreamToolFallbackIT`",
+      "references": ["Spring AI streaming fallback [reference:57]"]
+    },
+    {
+      "id": "M2",
+      "title": "Hybrid retrieval preserves multi-hop recall",
+      "description": "A two-hop relational query returns the correct connected facts; vector-only is insufficient for this fixture.",
+      "test": "`MultiHopMemoryIT`",
+      "references": ["Vector RAG multi-hop collapse [reference:58]"]
+    }
+  ]
+}
