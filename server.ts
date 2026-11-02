@@ -32,8 +32,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     hasApiKey: Boolean(apiKey),
-    engine: 'Lean Java Agentic Core (LJAC) Platform Server',
-    targetJdk: 'Java 21 LTS (java.base)',
+    engine: 'Apex Agent Management Chat Platform Server',
+    targetJdk: 'Java 21 LTS (Spring Boot 3.3, LangChain4j, Virtual Threads)',
   });
 });
 

@@ -71,18 +71,18 @@ export default function App() {
       <footer className="border-t border-slate-900 bg-slate-950/80 px-6 py-6 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-400">Lean Java Agentic Core (LJAC)</span>
+            <span className="font-semibold text-slate-400">Apex Agent Management Chat</span>
             <span aria-hidden="true">·</span>
-            <span>Java 21 LTS (java.base module)</span>
+            <span>Java 21 LTS Microkernel + CAS Evolution Plane</span>
             <span aria-hidden="true">·</span>
-            <span>Zero External Dependencies</span>
+            <span>Tauri 2.0 / React 19 Client</span>
           </div>
           <div className="flex items-center gap-4 text-[11px] font-mono text-slate-500">
-            <span>26 Micro-POJOs</span>
+            <span>9 Core Ports</span>
             <span>·</span>
-            <span>8 Subsystem Layers</span>
+            <span>22 Invariants (K1–K8, E1–E6, M1–M2, C1–C6)</span>
             <span>·</span>
-            <span>TypeScript Primary / Python Auxiliary</span>
+            <span>HCAT Ladder L0–L5</span>
           </div>
         </div>
       </footer>

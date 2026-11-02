@@ -28,7 +28,10 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
             <Terminal className="w-4 h-4" />
           </div>
-          <span>Lean Java Agentic Core</span>
+          <div className="flex items-center gap-2">
+            <span>Apex Agent Management Chat</span>
+            <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono uppercase bg-indigo-500/20 text-indigo-300 rounded border border-indigo-500/30">Dual-Plane</span>
+          </div>
         </a>
       </div>
 

@@ -1,0 +1,992 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  HIERARCHICAL CODING AGENT TREE
+  Integrated Project Specification & Plan
+
+  Consolidated from design conversation covering:
+    - Multi-model hierarchical agent orchestration
+    - Verification layering & defense-in-depth
+    - Task-class model routing & reliability metrics
+    - Layered instruction system & context economy
+
+  Intended for reference by an implementing LLM or engineering team.
+  Every rule below is either directly sourced from research findings
+  or derived from them as a design decision. Distinguish the two.
+-->
+<project-specification id="hcat-v1" version="1.0">
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       HOW TO USE THIS DOCUMENT
+       ═══════════════════════════════════════════════════════════════ -->
+  <reference-guide>
+    <section-ref name="design-principles" usage="Read first. Axioms that override any implementation choice."/>
+    <section-ref name="hard-rules" usage="Non-negotiable invariants. An implementation violating these is incorrect."/>
+    <section-ref name="architecture" usage="Agent roles, flow topology, and responsibilities."/>
+    <section-ref name="frozen-acceptance-contract" usage="The binding contract between architect and workers."/>
+    <section-ref name="verification-ladder" usage="Six layers, ordered by marginal cost. Each layer has a named failure class."/>
+    <section-ref name="model-routing-policy" usage="How to pick a model for a chunk. Cost-per-passing-build is the metric."/>
+    <section-ref name="instruction-layers" usage="System prompt, .agentrules, task prompt, model — precedence and content rules."/>
+    <section-ref name="progressive-disclosure" usage="How to load only what the current step requires."/>
+    <section-ref name="context-budget-enforcement" usage="Hard budgets per layer. Violations are implementation bugs."/>
+    <section-ref name="implementation-phases" usage="Ordered delivery plan with success gates."/>
+  </reference-guide>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       METADATA
+       ═══════════════════════════════════════════════════════════════ -->
+  <metadata>
+    <title>Efficient Hierarchical Coding Agent Tree</title>
+    <purpose>
+      Convert a human task into a verified artifact through a frozen acceptance
+      contract, a layered verification ladder, and a task-class-based model
+      routing policy — while keeping the architect's and PM's context lean.
+    </purpose>
+    <primary-optimization-targets>
+      <metric>Cost per passing build</metric>
+      <metric>pass^k reliability (not pass@k capability)</metric>
+      <metric>Architect review time per project</metric>
+      <metric>Active context tokens per agent per step</metric>
+    </primary-optimization-targets>
+    <non-goals>
+      <item>Maximizing model intelligence at every node</item>
+      <item>Maximizing pass@k (inflates under repeated sampling)</item>
+      <item>Adding verification layers for redundancy without a named failure class</item>
+      <item>Duplicating rules across instruction layers</item>
+    </non-goals>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       DESIGN PRINCIPLES — AXIOMS
+       ═══════════════════════════════════════════════════════════════ -->
+  <design-principles>
+
+    <principle id="P1" name="Judge evidence, not code">
+      The architect's competence is not in reading worker code. It is in
+      freezing the contract, owning the verification ladder, and reading a
+      ledger of criterion → disposition → evidence digest.
+      <corollary>The architect must never need to read a subagent transcript to accept or reject work.</corollary>
+    </principle>
+
+    <principle id="P2" name="Decidable checks belong in the harness, not the prompt">
+      Classes that are decidable belong in a script, never in an agent prompt.
+      Agents miss them because the prompt lists them among many checks and
+      attention drifts; the script never drifts.
+      <corollary>Every prompt rule must either teach judgment or declare an invariant. If it can be scripted, script it.</corollary>
+    </principle>
+
+    <principle id="P3" name="One rule, one layer">
+      Each convention lives in exactly one instruction layer; other layers
+      point to it or stay silent. Duplicating a rule across layers creates a
+      drift bomb: change one copy and you have authored a silent contradiction.
+    </principle>
+
+    <principle id="P4" name="Cheapest model that clears the threshold">
+      Route each chunk to the least expensive model whose cost-per-passing-build
+      and reliability@k clear the chunk's risk threshold. Escalate only on
+      failure or on an unmet threshold.
+      <evidence>Pareto Crewing: heterogeneous crews match best fixed crew quality at up to 25× lower cost given a ≥80%-accurate verifier.</evidence>
+      <evidence>Defect-repair case: uniformly low-cost crew statistically indistinguishable from frontier crew at one-fifteenth the cost.</evidence>
+    </principle>
+
+    <principle id="P5" name="Hidden suite selects; self-reports never do">
+      A build can pass its own tests yet still be wrong. Agent-generated tests
+      frequently execute successfully but exhibit weak assertions and missing
+      edge cases (the execution-adequacy gap). Selection is by the frozen
+      hidden acceptance suite the worker cannot read or edit.
+    </principle>
+
+    <principle id="P6" name="Reliability over capability">
+      pass@k measures whether at least one attempt succeeds — useful for
+      acquisition. pass^k measures whether all k attempts succeed — the metric
+      for customer-facing reliability and delegation scope.
+      <evidence>Per-run reliability 0.90 → pass^8 = 0.43 (fails in ~4 of 10 eight-step sessions).</evidence>
+      <evidence>τ-bench: frontier models above 60% average success drop below 25% at pass^8.</evidence>
+      <evidence>CodeBench: mean hidden-test pass rate 0.80 vs strict resolve rate 0.20 (4× inflation in single-rollout proxies).</evidence>
+    </principle>
+
+    <principle id="P7" name="Load less, not write less">
+      Freeing working context is achieved by loading only what the current step
+      requires, not by writing shorter prompts. Progressive disclosure + a
+      context firewall + harness enforcement together minimize active context.
+    </principle>
+
+    <principle id="P8" name="Cross-family verification for correlated blind spots">
+      When the same model writes and reviews, the checker shares the maker's
+      priors — same training distribution, same failure modes, same confident
+      wrong turns. At least one verifier must be from a different model family
+      than the executor.
+    </principle>
+
+    <principle id="P9" name="Frozen contract outranks every LLM judgment">
+      A subagent that fails a deterministic gate is rejected regardless of how
+      fluent its explanation is. The LLM judge's verdict is one input among
+      several; every change is gated by a deterministic layer the judge cannot
+      override.
+    </principle>
+
+    <principle id="P10" name="Context is a budget, enforced">
+      Every layer has a hard token/line budget. Exceeding it is an
+      implementation bug, not a tuning opportunity.
+    </principle>
+
+    <principle id="P11" name="Do not tell workers they are ranked">
+      Selection happens at the orchestration layer, not in the worker's prompt.
+      Competition-awareness prompting for ephemeral single-task agents risks
+      effort misallocation without quality gain, and offers no selection
+      benefit because there is no subsequent episode to shape.
+    </principle>
+
+    <principle id="P12" name="Decompose only when the coordination tax is beaten">
+      A naive planner-coder-reviewer pipeline costs 3.22× a single strong call
+      and solves no more tasks. Oracle per-task routing solves 94.3% of runs at
+      half the strong call's cost per solved task. The dividend comes from
+      per-task model choice, not from adding coordination layers.
+    </principle>
+
+  </design-principles>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       HARD RULES — NON-NEGOTIABLE
+       ═══════════════════════════════════════════════════════════════ -->
+  <hard-rules>
+    <rule id="HR-1">No subagent is dispatched without a frozen contract a deterministic script can evaluate.</rule>
+    <rule id="HR-2">If a criterion cannot be expressed as a command returning pass/fail, it is not ready for delegation.</rule>
+    <rule id="HR-3">The worker cannot edit the contract, the hidden tests, or the contract hash.</rule>
+    <rule id="HR-4">A worker's "completed" status with an unchecked criterion is unverified and never implies acceptance.</rule>
+    <rule id="HR-5">The PM never reads worker code to decide acceptance; it reads gate results.</rule>
+    <rule id="HR-6">The architect never reads worker transcripts; it reads the ledger.</rule>
+    <rule id="HR-7">At least one verifier per chunk must be from a different model family than the executor.</rule>
+    <rule id="HR-8">Every convention lives in exactly one instruction layer; duplication is a defect.</rule>
+    <rule id="HR-9">No subagent receives a competitive ranking, leaderboard, or "you are being scored" framing.</rule>
+    <rule id="HR-10">The frozen test suite decides when a session is done — not the agent.</rule>
+    <rule id="HR-11">Volatile data (timestamps, per-user state) never enters the cached system-prompt prefix.</rule>
+    <rule id="HR-12">If the PM encounters a case the contract does not cover, it stops and logs a Spec Gap; it does not guess.</rule>
+  </hard-rules>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       ARCHITECTURE
+       ═══════════════════════════════════════════════════════════════ -->
+  <architecture>
+
+    <flow-topology>
+      Human → Architect → PM → Worker Swarm → Verification Ladder → PM → Architect → Human
+      <note>
+        The chain is NOT capped at three levels. Intermediate management and
+        verification roles are added when, and only when, they own a failure
+        class no upstream layer can catch.
+      </note>
+    </flow-topology>
+
+    <agent-roles>
+      <role id="architect" tier="frontier" verification-authority="final">
+        <responsibility>Freeze spec, interface contracts, acceptance criteria, out-of-scope, evidence shapes.</responsibility>
+        <responsibility>Assign verification profile per chunk from risk.</responsibility>
+        <responsibility>Review evidence ledger and architectural conformance against the frozen spec.</responsibility>
+        <reads>Ledger only (criterion → disposition → evidence digest)</reads>
+        <does-not-read>Worker code; worker transcripts; PM narratives</does-not-read>
+      </role>
+
+      <role id="pm" tier="mid" verification-authority="dispatch">
+        <responsibility>Decompose frozen spec into a dependency graph of atomic chunks.</responsibility>
+        <responsibility>Classify each chunk into a named role; assign model tier and verification profile.</responsibility>
+        <responsibility>Dispatch, collect ResultContracts, run gates, compile ledger.</responsibility>
+        <responsibility>Maintain the task-class capability profiler.</responsibility>
+        <constraint>Does not reinterpret the spec. Does not guess Spec Gaps.</constraint>
+      </role>
+
+      <role id="scout" tier="fast" verification-authority="evidence-provenance">
+        <responsibility>Read-only reconnaissance; reproduce failures; hand off structured evidence.</responsibility>
+      </role>
+
+      <role id="executor" tier="mid-or-cheap" verification-authority="visible-smoke-test">
+        <responsibility>Implement a bounded chunk in an isolated git worktree.</responsibility>
+        <constraint>Sees only the visible smoke test. The hidden suite is the selector.</constraint>
+        <constraint>Returns a ResultContract, never prose.</constraint>
+      </role>
+
+      <role id="peer-verifier" tier="mid" verification-authority="binary-per-criterion">
+        <responsibility>Cross-family atomic yes/no checks against the frozen criteria.</responsibility>
+        <constraint>Cannot override a deterministic gate failure.</constraint>
+        <constraint>Never emits a scalar score; programmatic code aggregates verdicts.</constraint>
+      </role>
+
+      <role id="qa-verifier" tier="mid" verification-authority="black-box-behavioral">
+        <responsibility>Generate independent test scenarios from acceptance criteria; test the artifact as a black box.</responsibility>
+        <constraint>Does not see the worker's test plan.</constraint>
+        <catches>Silent mocking, integration drift, spec-gap resolutions, post-hoc confirmation tests.</catches>
+      </role>
+
+      <role id="integration-verifier" tier="mid" verification-authority="seam-behavior">
+        <responsibility>Check interface conformance and seam behavior between modules from different workers.</responsibility>
+        <activation>Only when interface drift is a named failure class for the project.</activation>
+      </role>
+    </agent-roles>
+
+    <context-firewall id="CF-1">
+      <rule>The architect and PM operate on compiled evidence, never raw worker transcripts.</rule>
+      <rule>Workers write artifacts to isolated git worktrees.</rule>
+      <rule>The PM receives a ResultContract (schema in return-contracts).</rule>
+      <rule>Verbose tool output is filtered by 80–98% before reaching the orchestrator.</rule>
+      <rule>Inter-agent transfers are structured (JSON schema-validated), never free-form prose.</rule>
+      <evidence>Free-text handoffs are the main source of context loss; malformed structure becomes a hallucination relay.</evidence>
+    </context-firewall>
+
+  </architecture>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       FROZEN ACCEPTANCE CONTRACT
+       ═══════════════════════════════════════════════════════════════ -->
+  <frozen-acceptance-contract id="FAC-1">
+
+    <required-fields>
+      <field name="acceptance-criteria" type="list&lt;command&gt;">
+        Binary pass/fail, expressed as rerunnable commands or git checks.
+        Example: `pytest tests/hidden/test_rate_limit.py::test_429_on_burst` exits 0
+      </field>
+      <field name="interface-contracts" type="typed-signatures">
+        Public interfaces the artifact must expose.
+      </field>
+      <field name="evidence-shapes" type="list&lt;artifact-predicate&gt;">
+        Proof format per criterion: exit code, log line, file existence, hash.
+      </field>
+      <field name="out-of-scope" type="list&lt;prohibition&gt;">
+        Explicit prohibitions (do not modify `auth/`, `migrations/`, etc.)
+      </field>
+      <field name="visible-hidden-split" type="test-partition">
+        Visible smoke test for the worker; hidden suite hashed and stored outside
+        the worker's write scope. Hidden suite determines selection.
+      </field>
+      <field name="return-schema" type="json-schema-ref">
+        The ResultContract fields the worker must populate.
+      </field>
+    </required-fields>
+
+    <freezing-rules>
+      <rule>Contract is SHA-256 hashed and stored outside the worker's write scope before dispatch.</rule>
+      <rule>Worker cannot edit criteria, hidden tests, or the contract hash.</rule>
+      <rule>Completion is derived from recorded evidence, not from the worker's completion claim.</rule>
+      <rule>The orchestrator re-verifies the worker's return before accepting it.</rule>
+    </freezing-rules>
+
+    <spec-gap-protocol>
+      When the PM encounters a case the contract does not cover:
+        1. Stop.
+        2. Log a Spec Gap with the exact uncovered case.
+        3. Escalate to the architect.
+      The PM must not guess. Guessing propagates specification failures downstream.
+    </spec-gap-protocol>
+
+  </frozen-acceptance-contract>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       VERIFICATION LADDER — SIX LAYERS
+       ═══════════════════════════════════════════════════════════════ -->
+  <verification-ladder id="VL-1">
+
+    <design-rule>
+      Verification is defense in depth, ordered by marginal cost. Each layer is
+      justified by the failure class it uniquely catches, not by its overall
+      catch rate. Layers must be independent — correlated failures defeat the model.
+    </design-rule>
+
+    <layer id="L0" name="Deterministic pre-gates" model="none" cost="near-zero" authority="sole-authority-mechanical">
+      <catches>Compilation, lint, typecheck, schema validation, file existence, exit codes.</catches>
+      <rule>Classes that are decidable belong in a script, never in an agent prompt.</rule>
+      <rule>Deterministic acceptance checks outrank every LLM judgment.</rule>
+      <rule>A subagent failing L0 is rejected regardless of explanation fluency.</rule>
+    </layer>
+
+    <layer id="L1" name="Worker self-check" model="cheap" cost="low" authority="none">
+      <catches>Obvious failures; reduces wasted reviewer cycles.</catches>
+      <rule>Never the acceptance authority. Workers are structurally optimistic.</rule>
+    </layer>
+
+    <layer id="L2" name="Cross-family peer verifier" model="mid" cost="moderate" authority="binary-per-criterion">
+      <catches>Correlated blind spots of the executor's model family.</catches>
+      <rule>Verifier must be from a different model family than the executor.</rule>
+      <rule>Atomic yes/no per criterion; code aggregates the answers. No scalar scores.</rule>
+      <rule>Cannot override an L0 failure.</rule>
+      <evidence>Same-family maker/checker split is two passes with one set of blind spots.</evidence>
+    </layer>
+
+    <layer id="L3" name="Independent QA / holdout" model="mid" cost="moderate-high" authority="black-box-behavioral">
+      <catches>Silent mocking, integration drift, spec-gap resolutions, confirmation tests written to pass.</catches>
+      <rule>QA generates its own scenarios from acceptance criteria, without seeing the worker's test plan.</rule>
+      <rule>Tests the artifact as a black box.</rule>
+    </layer>
+
+    <layer id="L4" name="Integration verifier" model="mid" cost="moderate" authority="seam-behavior" activation="conditional">
+      <catches>Cross-module interface drift and seam failures no single-module verifier owns.</catches>
+      <rule>Activate only when interface drift is a named failure class for the project.</rule>
+      <rule>Adding an integration verifier when modules are independent is pure overhead.</rule>
+    </layer>
+
+    <layer id="L5" name="Architect acceptance" model="frontier" cost="high" authority="final-adjudication">
+      <catches>Architectural conformance; residual Spec Gaps; split verdicts needing escalation.</catches>
+      <rule>Reviews evidence, not code.</rule>
+      <rule>Reserved for residuals only architectural knowledge can adjudicate.</rule>
+    </layer>
+
+    <verification-profiles>
+      <profile name="light" when="Trivial, reversible, covered by existing tests">
+        <layers>L0</layers>
+      </profile>
+      <profile name="standard" when="Ordinary feature work, bounded blast radius">
+        <layers>L0, L2, L3</layers>
+      </profile>
+      <profile name="heavy" when="Security-sensitive, migration-heavy, cross-cutting, irreversible">
+        <layers>L0, L2, L3, L4, L5</layers>
+        <gate>Human approval required.</gate>
+      </profile>
+    </verification-profiles>
+
+  </verification-ladder>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       MODEL ROUTING POLICY
+       ═══════════════════════════════════════════════════════════════ -->
+  <model-routing-policy id="MRP-1">
+
+    <efficiency-metric>
+      cost_per_passing_build = (sum of all attempt costs for a task class)
+                             / (number of tasks where at least one attempt passed the hidden suite)
+      <rule>Tokens per attempt is the wrong metric. It ignores retries, failures, and escalations.</rule>
+    </efficiency-metric>
+
+    <capability-profiler>
+      For every model × task class pair, maintain:
+      <tracked-metric>hidden-suite pass rate p (per single attempt)</tracked-metric>
+      <tracked-metric>cost per passing build (including retries and escalations)</tracked-metric>
+      <tracked-metric>integration pass rate (on tasks that must integrate with a fixed reference module)</tracked-metric>
+      <tracked-metric>reliability@k estimate from ≥5 independent rollouts</tracked-metric>
+      <update-rule>Profiler is updated after every dispatch. It replaces global benchmark reputation.</update-rule>
+    </capability-profiler>
+
+    <routing-rule>
+      <step>1. Classify the chunk into a named agent role.</step>
+      <step>2. Look up the task-class profile for that role.</step>
+      <step>3. Select the cheapest model whose cost-per-passing-build clears the chunk threshold AND whose reliability@k clears the risk threshold.</step>
+      <step>4. If no model clears the threshold, escalate one tier.</step>
+      <step>5. If the frontier tier fails, either decompose the chunk further or return it to the architect as a Spec Gap.</step>
+    </routing-rule>
+
+    <parallel-redundancy>
+      <rule>When a cheap model's single-attempt pass rate is p, run N independent builders in isolated worktrees.</rule>
+      <rule>Probability of at least one passing = 1 - (1-p)^N (pass@N).</rule>
+      <rule>Choose N to clear the acquisition target subject to a cost ceiling; compare parallel cost against escalating a rung.</rule>
+      <rule>Winner is selected by the frozen hidden suite, never by builder self-reports.</rule>
+    </parallel-redundancy>
+
+    <model-tier-mapping>
+      <tier name="fast">Bounded mechanical work, read-only reconnaissance, search, grep, formatting.</tier>
+      <tier name="mid">Ordinary implementation, editing, testing, standard review.</tier>
+      <tier name="frontier">Architecture, security, hard diagnosis, adversarial review, final adjudication.</tier>
+    </model-tier-mapping>
+
+  </model-routing-policy>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       RELIABILITY & SCOPE BOUNDING
+       ═══════════════════════════════════════════════════════════════ -->
+  <reliability-and-scope id="RSB-1">
+
+    <metric-distinction>
+      <pass-at-k>At least one of k attempts succeeds. Optimistic. Use for acquisition.</pass-at-k>
+      <pass-hat-k>All k attempts succeed. Use for customer-facing reliability and delegation scope.</pass-hat-k>
+      <formula>Under independence: pass^k = p^k</formula>
+      <sampling-rule>At least 5 independent rollouts are necessary to estimate reliability meaningfully.</sampling-rule>
+      <warning>Single-rollout proxy correlates with reliability@5 at only Spearman ρ=0.42 — below the 0.70 usefulness threshold.</warning>
+    </metric-distinction>
+
+    <scope-bounding-rule>
+      <formula>P_joint = ∏(i=1..M) p_i   where p_i is the model's pass rate on subcomponent i</formula>
+      <action-if-below-threshold>
+        Either (a) reduce M (fewer interfaces), (b) escalate the riskiest subcomponents
+        to a more reliable model, or (c) retain architect review of integration seams.
+      </action-if-below-threshold>
+      <example>Builder with 0.85 hidden-suite pass rate × 6 independent subcomponents → 0.85^6 ≈ 0.38 joint reliability. Do not delegate six independent modules to that model without redundancy or escalation.</example>
+    </scope-bounding-rule>
+
+    <integration-risk-rule>
+      Delegation budget is set by integration risk, not by module count. Per-module
+      pass rate is not the same as pass rate when modules interact.
+      <measure>integration pass rate on a small set of tasks where the module integrates with a fixed reference module.</measure>
+    </integration-risk-rule>
+
+  </reliability-and-scope>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       INSTRUCTION LAYERS
+       ═══════════════════════════════════════════════════════════════ -->
+  <instruction-layers id="IL-1">
+
+    <core-rule>
+      Each convention lives in exactly one layer; the others point to it or stay
+      silent. Precedence on conflict: L4 (user message) &gt; L3 (task prompt) &gt;
+      L2 (.agentrules) &gt; L1 (system prompt). Specificity wins. But the design
+      rule is to avoid conflicts by construction.
+    </core-rule>
+
+    <!-- ─────────────── LAYER 1: SYSTEM PROMPT ─────────────── -->
+    <layer id="L1" name="System prompt" scope="platform-tool" half-life="months">
+      <authority>Identity, safety, tool definitions, output schema, refusal boundaries.</authority>
+      <composition>
+        <section name="identity-header" stability="byte-stable">Agent name, role, capability scope.</section>
+        <section name="harness-core" stability="byte-stable">All-model behavioral rules, tool use, output format, safety.</section>
+        <section name="model-family-overlay" stability="byte-stable-per-family">Targeted corrections for this model family.</section>
+        <section name="exact-model-delta" stability="byte-stable-per-model">Narrow, auditable adjustments for this model ID.</section>
+        <section name="environment-context" stability="volatile-tail">Working directory, branch, timezone.</section>
+      </composition>
+      <overlay-rules>
+        <rule>Additive layers over a shared core — never branching prompt trees.</rule>
+        <rule>Family and exact-model rules must be evidence-driven and narrower than the shared core.</rule>
+        <rule>Per-model guidance keyed by model ID in one place; never spread across packages.</rule>
+        <rule>Only add an overlay when a model has a documented, authoritative quirk with a vendor-guide citation.</rule>
+        <rule>Routing is by model family, not by provider or runtime.</rule>
+      </overlay-rules>
+      <caching-discipline>
+        <rule>System prompt is the most expensive layer per token because it is always present.</rule>
+        <rule>Prompt caching can reduce input cost by up to 90% — only if the cached prefix stays byte-stable.</rule>
+        <rule>Volatile data (timestamps, per-user context, live state) goes in the volatile tail, never the cached prefix.</rule>
+        <rule>Monitor stable-prefix ratio and section hashes to detect cache-breaking changes.</rule>
+      </caching-discipline>
+    </layer>
+
+    <!-- ─────────────── LAYER 2: .AGENTRULES / AGENTS.MD ─────────────── -->
+    <layer id="L2" name=".agentrules / AGENTS.md" scope="project-directory" half-life="weeks-months">
+      <authority>Project-specific rules that apply to every task in that scope.</authority>
+      <nature>A constraint spec, not documentation.</nature>
+
+      <discovery>
+        <path priority="global">&tilde;/.gemini/AGENTS.md</path>
+        <path priority="global">&tilde;/.gemini/config/rules/*.md</path>
+        <path priority="workspace">&lt;workspace&gt;/AGENTS.md</path>
+        <path priority="workspace">&lt;workspace&gt;/.agents/AGENTS.md</path>
+        <path priority="workspace">&lt;workspace&gt;/.agents/rules/*.md</path>
+        <path priority="bridge">&lt;dir&gt;/.agentrules</path>
+        <precedence>global &lt; workspace &lt; directory. More specific directory rules take priority. Rules are cumulative, not replacement-based.</precedence>
+      </discovery>
+
+      <activation-modes>
+        <mode name="always_on">Full content injected on every call. Use when the rule must hold for every task in scope.</mode>
+        <mode name="model_decision">Only path and description pre-injected; agent reads full rule on demand. Use for detailed domain guidance.</mode>
+        <mode name="glob">Activated when the agent interacts with matching files. Use for path-scoped conventions.</mode>
+        <mode name="manual">Explicit invocation only. Use for rare or dangerous procedures.</mode>
+      </activation-modes>
+
+      <content-rules>
+        <rule id="AR-1">Positive specification over negative patching. Replace DO NOT blocks with a single positive specification. Negative instructions can prime the forbidden behavior and bloat the prompt.</rule>
+        <rule id="AR-2">Commands section: exact, runnable, one-shot non-interactive forms. A command that never exits hangs an agent.</rule>
+        <rule id="AR-3">Three-tier boundaries: Always (run the gate command), Ask first (new dependency, schema migration), Never (edit generated files, commit secrets). Each Never line carries a one-clause reason.</rule>
+        <rule id="AR-4">No hedging words. "Usually," "generally," "try to" are not rules. A rule with exceptions names them; a soft convention is a split, not a rule.</rule>
+        <rule id="AR-5">Point, don't paste. "Follow &lt;path/to/exemplar&gt;" survives refactors; a pasted template drifts within weeks.</rule>
+        <rule id="AR-6">Use pipe-delimited indexes for file trees. Cuts tokens by 70–80% while remaining parseable by major models.</rule>
+        <rule id="AR-7">Root .agentrules is a bridge, not a dump. It links to the canonical AGENTS.md and contains only quick-reference essentials.</rule>
+      </content-rules>
+
+      <length-budget>
+        <rule>Always-loaded core: 15–40 lines maximum.</rule>
+        <rule>Active rule content should stay under 150 lines. Beyond ~150 lines, extra rules often hurt accuracy.</rule>
+        <rule>Path-scoped rule files: 10–30 lines per rule file.</rule>
+      </length-budget>
+    </layer>
+
+    <!-- ─────────────── LAYER 3: TASK PROMPT ─────────────── -->
+    <layer id="L3" name="Task prompt / skill content" scope="task-type-phase" half-life="hours-days">
+      <authority>What is true for this phase or task class.</authority>
+      <must-not-duplicate>Project rules (L2) or system-level identity (L1).</must-not-duplicate>
+
+      <required-structure>
+        <field name="role-boundary">One sentence: what this agent is responsible for, and what it is not.</field>
+        <field name="agentrules-pointer">Path to the scoped rule file the agent must follow.</field>
+        <field name="acceptance-contract-path">Path to the frozen contract.</field>
+        <field name="return-schema">The ResultContract fields the agent must populate.</field>
+        <field name="stop-conditions">When to stop and return rather than continue.</field>
+        <field name="format-hint">The recommended input format for this model class (see format-policy).</field>
+      </required-structure>
+
+      <length-budget>
+        <rule>Task prompt: ≤ 500 tokens. Structured, no prose padding.</rule>
+      </length-budget>
+    </layer>
+
+    <!-- ─────────────── LAYER 4: MODEL SELECTION ─────────────── -->
+    <layer id="L4" name="Model specification" scope="agent-role" half-life="varies">
+      <authority>Model choice and input format are part of the instruction configuration, not an afterthought.</authority>
+      <pinned-per-role>
+        <attribute name="model-tier">frontier / mid / fast, tied to role responsibility.</attribute>
+        <attribute name="model-family">For cross-family verification requirements.</attribute>
+        <attribute name="exact-model-id">For auditability and prompt overlay keying.</attribute>
+        <attribute name="input-format-preference">prose / markdown / json / binary-schema.</attribute>
+      </pinned-per-role>
+    </layer>
+
+    <!-- ─────────────── LAYER 5: HARNESS ENFORCEMENT ─────────────── -->
+    <layer id="HARNESS" name="Harness enforcement" scope="infrastructure" in-context="false">
+      <rationale>
+        Instructions in the context window are subject to attention degradation.
+        Hooks and validators live in the infrastructure and fire regardless of
+        attention state. The prompt teaches judgment and declares invariants;
+        hooks and validators enforce them.
+      </rationale>
+      <mechanisms>
+        <mechanism name="hooks">Syntax checks, file-shape checks, CLI policy, gate commands.</mechanism>
+        <mechanism name="deterministic-gates">Compilation, lint, typecheck, schema validation (L0).</mechanism>
+        <mechanism name="return-schema-validation">Rejects malformed ResultContract before content is read.</mechanism>
+      </mechanisms>
+    </layer>
+
+  </instruction-layers>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PROGRESSIVE DISCLOSURE
+       ═══════════════════════════════════════════════════════════════ -->
+  <progressive-disclosure id="PD-1">
+
+    <tier id="T1" name="Apex kernel" activation="always">
+      <content>Project description (one line), build commands, critical invariants, phase router.</content>
+      <budget>Under 150 lines total; active rule content under 5–10% of the context window.</budget>
+      <purpose>Tells the agent where to go, not the deep details of how to execute.</purpose>
+    </tier>
+
+    <tier id="T2" name="Phase directors / path-scoped rules" activation="just-in-time">
+      <content>Local orchestrator instructions, which skills to use, exit criteria for the phase.</content>
+      <activation>trigger: glob (file pattern) OR trigger: model_decision (inject path and description only; agent reads full rule on demand).</activation>
+      <rule>On phase transition, drop the prior phase director from active context.</rule>
+      <budget>≤ 30 lines per director.</budget>
+    </tier>
+
+    <tier id="T3" name="Execution skills" activation="explicit-instruction">
+      <content>Deep operational protocols, anti-rationalization tables, evidence requirements.</content>
+      <rule>Once a skill is completed, drop it from active context.</rule>
+      <rule>Skill files contain only phase definitions and pointers — not embedded references — to avoid recursive loading.</rule>
+      <budget>≤ 500 lines per skill.</budget>
+    </tier>
+
+    <read-and-drop-discipline>
+      <rule>Do not read the entire skills/ directory at once.</rule>
+      <rule>When routed to a phase, read ONLY that phase's director file.</rule>
+      <rule>When the director says to execute a specific skill, read ONLY that specific file.</rule>
+      <rule>Active context after loading must be: apex kernel + current phase director + active skill. Nothing else.</rule>
+    </read-and-drop-discipline>
+
+    <instruction-neglect-prevention>
+      <warning>If an agent loads all skill files simultaneously, the noise ratio becomes too high and it reverts to baseline training behaviors, ignoring the strict protocols.</warning>
+      <rule>Monitor compliance ceiling; prune before adding.</rule>
+    </instruction-neglect-prevention>
+
+  </progressive-disclosure>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       CONTEXT BUDGET ENFORCEMENT
+       ═══════════════════════════════════════════════════════════════ -->
+  <context-budget-enforcement id="CBE-1">
+
+    <per-layer-budgets>
+      <budget layer="system-prompt-stable-prefix" limit="5–10% of context window" enforcement="harness rejects if exceeded"/>
+      <budget layer="active-agentrules" limit="≤ 150 lines" enforcement="linter warning; loader truncates with alert"/>
+      <budget layer="phase-director" limit="≤ 30 lines" enforcement="dropped on phase transition"/>
+      <budget layer="execution-skill" limit="≤ 500 lines" enforcement="dropped on completion"/>
+      <budget layer="task-prompt" limit="≤ 500 tokens" enforcement="structured, no prose padding"/>
+      <budget layer="result-contract" limit="≤ 500 tokens" enforcement="schema-validated"/>
+    </per-layer-budgets>
+
+    <context-firewall id="CF-2">
+      <rule>Orchestrator and architect never receive raw subagent transcripts.</rule>
+      <rule>Verbose tool output filtered by 80–98% before reaching the orchestrator.</rule>
+      <rule>Subagents run in isolated context windows with only the brief and inputs they need.</rule>
+      <rule>Subagent context is discarded on return.</rule>
+    </context-firewall>
+
+    <handoff-size-rule>
+      <rule>Handoff artifacts should target ~500 tokens. If a handoff exceeds 500 tokens, it includes details the next agent can discover by reading the code.</rule>
+      <rule>Structured handoffs (JSON schema-validated) yield 30–60% higher accuracy than free-form prose.</rule>
+    </handoff-size-rule>
+
+  </context-budget-enforcement>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       FORMAT POLICY
+       ═══════════════════════════════════════════════════════════════ -->
+  <format-policy id="FP-1">
+
+    <format-tax>
+      <finding>
+        Structured output requirements (JSON, XML, LaTeX, Markdown) substantially
+        degrade reasoning and writing performance across open-weight models. The
+        dominant cost enters at the prompt: format-requesting instructions alone
+        cause most of the accuracy loss, before any decoder constraint is applied.
+      </finding>
+      <finding>Few-shot examples and schema descriptions leave most of the degradation intact.</finding>
+      <finding>What works: decoupling reasoning from formatting — generate freeform first, then reformat in a second pass; or enable extended thinking within a single generation.</finding>
+      <finding>Most recent closed-weight models show little to no format tax.</finding>
+    </format-tax>
+
+    <format-selection-matrix>
+      <row model-class="open-weight-small" task-class="reasoning-heavy" format="freeform-prose then structured-extraction">
+        Rationale: structured output taxes open-weight reasoning.
+      </row>
+      <row model-class="open-weight-small" task-class="bounded-coding" format="json or markdown with consistent schema">
+        Rationale: consistent formatting improves efficiency and stability.
+      </row>
+      <row model-class="closed-weight-frontier" task-class="any" format="markdown or json matching vendor conventions">
+        Rationale: little to no format tax; vendor alignment helps.
+      </row>
+      <row model-class="any" task-class="verification" format="narrow json schema (binary verdicts, paths)">
+        Rationale: mechanical aggregation; no reasoning about format.
+      </row>
+      <row model-class="any" task-class="rule-following" format="scoped .agentrules, 30–150 active lines">
+        Rationale: progressive disclosure maximizes compliance.
+      </row>
+    </format-selection-matrix>
+
+    <measurement-rule>
+      Format choice must be measured, not assumed. Track cost-per-passing-build
+      and hidden-suite pass rate by format for each model × task class pair.
+      Select the format that minimizes cost without degrading quality.
+    </measurement-rule>
+
+  </format-policy>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       RETURN CONTRACTS
+       ═══════════════════════════════════════════════════════════════ -->
+  <return-contracts id="RC-1">
+
+    <result-contract>
+      <rule>Every worker returns this structure. A "completed" status with an unchecked criterion is unverified and never implies acceptance.</rule>
+      <rule>The subagent never returns prose. If the schema is invalid, the return is rejected before any content is read.</rule>
+      <rule>Skipped verification steps must be recorded as SKIPPED:&lt;reason&gt; from a closed vocabulary; PASS cannot be claimed for a skipped check.</rule>
+      <schema><![CDATA[
+{
+  "status": "completed | partial | blocked | failed",
+  "criteria": [
+    {
+      "id": "AC-1",
+      "disposition": "pass | fail | skipped:<reason>",
+      "evidence_digest": "sha256:..."
+    }
+  ],
+  "changed_files": ["path/to/file"],
+  "unresolved": ["description of any Spec Gap"],
+  "verification": {
+    "commands_run": ["..."],
+    "results": ["pass | fail | skipped:<reason>"]
+  }
+}
+      ]]></schema>
+    </result-contract>
+
+    <architect-ledger>
+      <rule>The architect returns a pass/fail ledger to the human, not a narrative.</rule>
+      <columns>criterion | disposition | evidence digest | verification layers passed</columns>
+      <human-review>Human samples the ledger and verifies high-risk entries against artifacts. Human does not re-read the code.</human-review>
+    </architect-ledger>
+
+  </return-contracts>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       AGENT DEFINITION SCHEMA
+       ═══════════════════════════════════════════════════════════════ -->
+  <agent-definition-schema id="ADS-1">
+    <description>
+      Binds all four specification axes: .agentrules scope, system-prompt
+      composition, task-prompt template, and model (family, exact ID, format).
+    </description>
+    <schema><![CDATA[
+agent:
+  id: "coder-python"
+  role: "executor"
+
+  model:
+    family: "anthropic"
+    exact_id: "claude-sonnet-4"
+    tier: "mid"
+    input_format: "markdown"       # prose | markdown | json | binary_schema
+
+  system_prompt:
+    base: "prompts/harness_core.md"
+    family_overlay: "prompts/overlays/anthropic.md"
+    exact_delta: "prompts/deltas/claude-sonnet-4.md"
+    cache_stable: true
+
+  agentrules:
+    global: "~/.gemini/AGENTS.md"
+    project: "AGENTS.md"
+    path_scoped:
+      - glob: "**/*.py"
+        rule: ".agents/rules/python.md"
+        trigger: "glob"
+      - description: "Database migration conventions"
+        rule: ".agents/rules/migrations.md"
+        trigger: "model_decision"
+
+  task_prompt:
+    template: "prompts/tasks/implement_module.md"
+    max_tokens: 500
+    acceptance_contract: "contracts/{{task_id}}.yml"
+    return_schema: "schemas/ResultContract.json"
+
+  verification:
+    profile: "standard"            # light | standard | heavy
+    cross_family_verifier: true
+
+  context:
+    max_active_rules_lines: 150
+    drop_completed_skills: true
+    context_firewall: true
+    ]]></schema>
+  </agent-definition-schema>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       ARCHITECT DECISION PROCEDURE
+       ═══════════════════════════════════════════════════════════════ -->
+  <architect-decision-procedure id="ADP-1">
+    <description>For each chunk in the decomposition graph:</description>
+    <step n="1">
+      CLASSIFY the chunk into a named role (scout, plan-verifier, mech-executor,
+      executor, verifier, security-reviewer, security-executor).
+      If no role fits → decompose further.
+    </step>
+    <step n="2">
+      ASSIGN verification profile from risk:
+      Light (trivial) · Standard (ordinary) · Heavy (security / migration / irreversible).
+    </step>
+    <step n="3">
+      ASSIGN model tier from the task-class profile:
+      cheapest tier whose cost-per-passing-build clears the chunk threshold.
+      If none clears → escalate one rung.
+    </step>
+    <step n="4">
+      FREEZE the acceptance contract on disk:
+      rerunnable commands, evidence shapes, out-of-scope, return schema.
+      Hash it. Store outside the worker's write scope.
+    </step>
+    <step n="5">
+      DISPATCH with a brief containing:
+      role boundary, frozen contract path, return schema, stop conditions,
+      format hint. No competitive framing. No leaderboard.
+    </step>
+    <step n="6">
+      ON RETURN, run the gate:
+      L0 deterministic gates first (sole authority for mechanical failure).
+      L2 cross-family verifier only if L0 passes.
+      L3 independent QA for standard/heavy profiles.
+      L4 integration verifier only for multi-module projects.
+      Reject any "completed" claim contradicting a failed gate.
+    </step>
+    <step n="7">
+      COMPILE the verdict into the architect's ledger:
+      criterion → disposition → evidence digest.
+      Do not include the subagent's narrative in the ledger.
+    </step>
+    <step n="8">
+      UPDATE the task-class profile:
+      cost per passing build, hidden-suite pass rate, verifier accuracy.
+    </step>
+  </architect-decision-procedure>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       STOPPING RULE
+       ═══════════════════════════════════════════════════════════════ -->
+  <stopping-rule id="SR-1">
+    <rule>The frozen test suite decides when a session is done — not the agent.</rule>
+    <rule>Once every acceptance criterion in the frozen contract has a disposition of pass (or a documented, escalated Spec Gap), the cycle terminates.</rule>
+    <rule>The architect does not continue generating work after the contract is satisfied.</rule>
+    <evidence>Hierarchical systems frequently continue past acceptance: two-thirds of rounds can occur after implementation was accepted.</evidence>
+  </stopping-rule>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       IMPLEMENTATION PHASES
+       ═══════════════════════════════════════════════════════════════ -->
+  <implementation-phases>
+
+    <phase n="1" name="Contract and rule-store foundation" weeks="1–4">
+      <deliverables>
+        <item>Frozen acceptance contract template with required fields.</item>
+        <item>Hash-and-freeze mechanism; worker write-scope isolation.</item>
+        <item>Layer 0 deterministic gate runner (compilation, lint, typecheck, schema validation, test runner).</item>
+        <item>ResultContract JSON schema and validator.</item>
+        <item>Scoped .agentrules / AGENTS.md discovery with directory-tree walk and precedence resolution.</item>
+        <item>YAML frontmatter parser for always_on / model_decision / glob / manual.</item>
+        <item>Rule linter: positive-specification check, hedging-word detection, line-budget enforcement.</item>
+      </deliverables>
+      <gate>A trivial task can be dispatched against a frozen contract; the worker cannot modify the contract or hidden tests. An agent editing a subdirectory file receives the correct cumulative rule set.</gate>
+    </phase>
+
+    <phase n="2" name="Verification ladder and progressive disclosure" weeks="5–8">
+      <deliverables>
+        <item>Layer 2 cross-family peer verifier with atomic binary schema and programmatic aggregation.</item>
+        <item>Layer 3 independent QA holdout test generator.</item>
+        <item>PM decomposition engine: dependency graph, atomic chunking, role classification, verification-profile assignment.</item>
+        <item>Context firewall: PM receives ResultContract, not transcripts.</item>
+        <item>Three-tier progressive disclosure loader; read-and-drop mechanism; per-layer budget enforcement.</item>
+      </deliverables>
+      <gate>A multi-chunk task dispatches, verifies through L0–L3, and compiles into a ledger without the PM reading worker code. A multi-phase agent never holds more than apex kernel + current phase director + active skill.</gate>
+    </phase>
+
+    <phase n="3" name="Capability profiler, routing, and prompt caching" weeks="9–12">
+      <deliverables>
+        <item>Task-class capability profiler populated from ≥5 rollouts per model per task class.</item>
+        <item>Cost-per-passing-build and reliability@k calculator.</item>
+        <item>Routing policy: cheapest model clearing threshold, escalate on failure.</item>
+        <item>Parallel redundancy dispatch with hidden-suite selection.</item>
+        <item>Stable-prefix system-prompt composer; volatile tail; cache-hit monitoring.</item>
+      </deliverables>
+      <gate>Routing decisions improve cost per passing build on a held-out task class without reducing hidden-suite pass rate. Repeated calls achieve ≥80% cache hit rate on the system-prompt prefix.</gate>
+    </phase>
+
+    <phase n="4" name="Integration verifier and heavy-profile hardening" weeks="13–16">
+      <deliverables>
+        <item>Layer 4 integration verifier for multi-module seams.</item>
+        <item>Heavy-profile workflow: Layers 0–5 plus human approval for security/migration tasks.</item>
+        <item>Scope-bounding calculator integrated into PM dispatch.</item>
+        <item>Architect final ledger review workflow.</item>
+        <item>Model-family overlays and exact-model deltas with vendor-guide citations.</item>
+      </deliverables>
+      <gate>A multi-module project with a security-sensitive component completes through the Heavy profile; the human can sample-verify the ledger in under 15 minutes. Routing to a different model family uses the correct overlay and format without manual reconfiguration.</gate>
+    </phase>
+
+    <phase n="5" name="Format policy and context isolation" weeks="17–20">
+      <deliverables>
+        <item>Format-selection matrix integrated into agent definitions.</item>
+        <item>.agentrules progressive-disclosure template per task class.</item>
+        <item>Format A/B measurement: cost per passing build and hidden-suite pass rate by format.</item>
+        <item>Subagent isolation: fresh context window containing only brief and inputs.</item>
+        <item>Context firewall: 80–98% filtering of verbose tool output.</item>
+        <item>Structured inter-agent protocol: JSON schema-validated contracts between router and specialists.</item>
+      </deliverables>
+      <gate>PM selects the input format minimizing cost per passing build per model × task class. Orchestrator context stays below budget while a subagent processes a tool-output-heavy task.</gate>
+    </phase>
+
+  </implementation-phases>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       EVALUATION METRICS
+       ═══════════════════════════════════════════════════════════════ -->
+  <evaluation-metrics>
+    <metric name="cost-per-passing-build" direction="minimize">
+      Total attempt cost ÷ tasks with ≥1 hidden-suite pass.
+    </metric>
+    <metric name="hidden-suite-pass-rate" direction="maximize">
+      Fraction of tasks clearing the frozen hidden suite.
+    </metric>
+    <metric name="pass-hat-k-reliability" direction="maximize-for-production-scope">
+      Fraction of k independent rollouts where all pass.
+    </metric>
+    <metric name="architect-review-time" direction="minimize">
+      Minutes on ledger sampling vs. code reading.
+    </metric>
+    <metric name="spec-gap-rate" direction="minimize">
+      Fraction of tasks hitting an unresolved spec ambiguity.
+    </metric>
+    <metric name="verification-false-negative-rate" direction="minimize">
+      Fraction of accepted builds that later fail real-world use.
+    </metric>
+    <metric name="coordination-overhead-ratio" direction="minimize-subject-to-quality">
+      (PM + verifier token cost) ÷ (worker token cost).
+    </metric>
+    <metric name="active-rule-lines" direction="minimize">
+      Total lines of .agentrules in context. Target: ≤ 150.
+    </metric>
+    <metric name="system-prompt-cache-hit-rate" direction="maximize">
+      Fraction of calls reusing the cached prefix. Target: ≥ 80%.
+    </metric>
+    <metric name="instruction-compliance-rate" direction="maximize">
+      Fraction of rules followed on spot-check tasks.
+    </metric>
+    <metric name="context-utilization" direction="minimize-subject-to-quality">
+      Active context tokens ÷ model window.
+    </metric>
+    <metric name="context-rot-incidents" direction="minimize">
+      Tasks where a late-session rule violation occurs.
+    </metric>
+    <non-metric name="pass-at-k">
+      Does not optimize for raw pass@k. It inflates under repeated sampling and
+      overstates customer-facing reliability.
+    </non-metric>
+  </evaluation-metrics>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       RISKS AND MITIGATIONS
+       ═══════════════════════════════════════════════════════════════ -->
+  <risks>
+    <risk id="R-1" name="Coordination tax exceeds heterogeneity dividend">
+      <mitigation>Gate every decomposition behind the break-even rule: decompose only when the expected saving from cheaper roles exceeds handoff cost.</mitigation>
+    </risk>
+    <risk id="R-2" name="Worker self-tests are optimistic">
+      <mitigation>Hidden suite is the sole selector. L3 QA generates independent tests from the contract, not from the worker's tests.</mitigation>
+    </risk>
+    <risk id="R-3" name="Same-family review shares blind spots">
+      <mitigation>L2 peer verifier must be a different model family than the executor.</mitigation>
+    </risk>
+    <risk id="R-4" name="Over-decomposition">
+      <mitigation>Add an intermediate layer only when it owns a failure class no upstream layer can catch. Measure coordination-overhead ratio.</mitigation>
+    </risk>
+    <risk id="R-5" name="Format tax degrades open-weight reasoning">
+      <mitigation>Decouple reasoning from formatting for reasoning-heavy steps. Measure format choice by cost-per-passing-build, not parse success.</mitigation>
+    </risk>
+    <risk id="R-6" name="Context drift in long projects">
+      <mitigation>Context firewall. PM receives ResultContract; architect receives ledger. No raw transcripts in judgment contexts.</mitigation>
+    </risk>
+    <risk id="R-7" name="Post-completion loops">
+      <mitigation>Frozen test suite defines done; architect terminates on all-pass ledger.</mitigation>
+    </risk>
+    <risk id="R-8" name="Drift bombs from duplicated rules">
+      <mitigation>One rule, one layer; other layers point or stay silent.</mitigation>
+    </risk>
+    <risk id="R-9" name="Instruction neglect from overloaded context">
+      <mitigation>Progressive disclosure; read-and-drop; compliance-ceiling monitoring.</mitigation>
+    </risk>
+    <risk id="R-10" name="Cache-breaking system-prompt changes">
+      <mitigation>Byte-stable prefix; volatile data in the tail; stable-prefix monitoring.</mitigation>
+    </risk>
+    <risk id="R-11" name="Model-family mismatch">
+      <mitigation>Additive overlays over shared core; narrow exact-model deltas; vendor-guide evidence.</mitigation>
+    </risk>
+    <risk id="R-12" name="Subagent inherits nothing">
+      <mitigation>Explicit injection protocol; critical constraints passed at invocation.</mitigation>
+    </risk>
+    <risk id="R-13" name="Negative instruction priming">
+      <mitigation>Positive specification over negative patching.</mitigation>
+    </risk>
+    <risk id="R-14" name="Reward hacking by competition-aware agents">
+      <mitigation>Do not tell workers they are ranked. Selection happens at the orchestration layer. Hidden checks the worker cannot edit.</mitigation>
+    </risk>
+    <risk id="R-15" name="Spec-gap guessing">
+      <mitigation>PM stops and logs Spec Gaps; does not guess. Architect resolves or decomposes further.</mitigation>
+    </risk>
+  </risks>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       DEFINITION OF DONE
+       ═══════════════════════════════════════════════════════════════ -->
+  <definition-of-done>
+    <criterion n="1">Every agent definition specifies .agentrules scope, system-prompt composition, task-prompt template, and model (family, exact ID, format).</criterion>
+    <criterion n="2">Rule discovery resolves cumulative scopes with correct precedence and zero duplicated rules across layers.</criterion>
+    <criterion n="3">Progressive disclosure ensures no agent loads more than the apex kernel plus its current phase director and active skill.</criterion>
+    <criterion n="4">System-prompt prefixes are byte-stable and achieve ≥80% cache hit rate on repeated calls.</criterion>
+    <criterion n="5">Model-family overlays and exact-model deltas are keyed by model ID and documented with vendor-guide evidence.</criterion>
+    <criterion n="6">The context firewall keeps the orchestrator's active context below budget while subagents process tool-heavy work.</criterion>
+    <criterion n="7">The verification ladder catches a seeded failure at the layer designed to catch it (qualification test for each layer).</criterion>
+    <criterion n="8">The capability profiler recalibrates routing from at least 20 observed task executions.</criterion>
+    <criterion n="9">The PM can dispatch a multi-chunk task, route each chunk by task-class profile, and compile a ledger without reading worker code.</criterion>
+    <criterion n="10">The human can verify a completed project by sampling the architect's ledger — not by reading every prompt or every line of code.</criterion>
+  </definition-of-done>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       CLOSING PRINCIPLE
+       ═══════════════════════════════════════════════════════════════ -->
+  <closing-principle>
+    The architect's competence is not in reading the builder's code. It is in
+    freezing the contract, owning the verification ladder, and routing each
+    verification layer to the cheapest agent and format that can clear it
+    reliably. The best way to free up a model's working context is not to write
+    less, but to load less — and to move every decidable rule out of the prompt
+    and into the harness. Instructions teach judgment; hooks enforce invariants;
+    progressive disclosure loads only what the current step requires; and
+    model-specific overlays ensure the same instruction is expressed in the
+    format each model was trained to follow.
+  </closing-principle>
+
+</project-specification>

@@ -1,0 +1,523 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pipeline-specification
+    name="architect-coder-orchestration"
+    version="1.0.0"
+    status="production-candidate"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <!-- ============================================================
+       0. METADATA & DESIGN PHILOSOPHY
+       ============================================================ -->
+  <metadata>
+    <description>
+      A manager-driven multi-agent pipeline where a large-context Architect
+      produces a structured design dossier, an Orchestrator decomposes and
+      routes work, smaller-context Coder agents implement in isolated git
+      worktrees, and a Verifier gates every merge. The pipeline uses a
+      nested-loop control structure (inner action loop + outer reflection loop)
+      modeled on Magentic-One, with a durable task board and typed handoff
+      envelopes modeled on production agent-engineering practice.
+    </description>
+    <design_principles>
+      <principle id="P1">Authority attenuates down the tree: child ⊆ parent ∩ role.</principle>
+      <principle id="P2">Every handoff is typed, versioned, and validated against a schema.</principle>
+      <principle id="P3">State lives in a durable ledger, not in chat history.</principle>
+      <principle id="P4">Workers are stateless; failed attempts leave zero trace.</principle>
+      <principle id="P5">Free-form prose is untrusted data; only typed fields drive routing.</principle>
+    </design_principles>
+  </metadata>
+
+  <!-- ============================================================
+       1. TOPOLOGY & CONTROL FLOW
+       ============================================================ -->
+  <topology>
+    <graph type="directed-acyclic-graph-with-rejection-edges">
+      <node id="orchestrator" layer="control" />
+      <node id="architect"    layer="planning" />
+      <node id="coder"        layer="execution" multiplicity="1..N" />
+      <node id="verifier"     layer="quality-gate" />
+      <edge from="orchestrator" to="architect" label="decompose-goal" />
+      <edge from="architect"    to="orchestrator" label="design-dossier" />
+      <edge from="orchestrator" to="coder"    label="task-delegation" />
+      <edge from="coder"        to="verifier" label="implementation-result" />
+      <edge from="verifier"     to="coder"    label="rejection-with-feedback" type="loop" />
+      <edge from="verifier"     to="orchestrator" label="approval-or-escalation" />
+    </graph>
+
+    <control_structure>
+      <outer_loop name="reflection">
+        <trigger>stall_counter_exceeds_threshold OR cycle_detected</trigger>
+        <action>
+          The Orchestrator writes a reflection entry to the ledger:
+          what went wrong, what was learned, and a revised plan.
+          The task ledger is updated before the next inner-loop cycle begins.
+        </action>
+        <max_iterations>3</max_iterations>
+      </outer_loop>
+      <inner_loop name="action">
+        <steps>
+          <step>Select highest-priority pending task matching role.</step>
+          <step>Validate handoff envelope against schema.</step>
+          <step>Dispatch to worker with isolated execution context.</step>
+          <step>Collect typed result; update ledger atomically.</step>
+          <step>Increment or reset stall counter based on progress signal.</step>
+        </steps>
+      </inner_loop>
+      <termination>
+        <condition>all_tasks_terminal AND verifier_approved</condition>
+        <condition>max_attempts_exceeded</condition>
+        <condition>max_wall_clock_exceeded</condition>
+      </termination>
+    </control_structure>
+  </topology>
+
+  <!-- ============================================================
+       2. ROLE DEFINITIONS
+       ============================================================ -->
+  <roles>
+
+    <!-- 2.1 ORCHESTRATOR -->
+    <role id="orchestrator" model_tier="large-context" write_access="none">
+      <mission>Own the ledger, decompose goals, route typed work, detect stalls, and enforce invariants.</mission>
+      <allowed_tools>
+        <tool>task-board.read</tool>
+        <tool>task-board.claim</tool>
+        <tool>task-board.transition</tool>
+        <tool>ledger.write</tool>
+        <tool>envelope.validate</tool>
+        <tool>worktree.allocate</tool>
+      </allowed_tools>
+      <forbidden_tools>
+        <tool>file.write</tool>
+        <tool>file.edit</tool>
+        <tool>git.commit</tool>
+        <tool>shell.exec</tool>
+      </forbidden_tools>
+      <instructions>
+        <critical_constraint id="O-C1">
+          The Orchestrator MUST NOT write or edit source files. It only
+          coordinates; implementation authority belongs to coders.
+        </critical_constraint>
+        <critical_constraint id="O-C2">
+          Every dispatch MUST include a schema-valid handoff envelope.
+          If validation fails, the task returns to pending with
+          failure code HANDOFF_INVALID.
+        </critical_constraint>
+        <critical_constraint id="O-C3">
+          The Orchestrator MUST maintain a stall counter per active task
+          and trigger reflection when progress signals are absent for
+          two consecutive cycles.
+        </critical_constraint>
+      </instructions>
+      <output_contract>
+        <field name="dispatch" type="handoff-envelope" required="true" />
+        <field name="ledger_update" type="ledger-entry" required="true" />
+        <field name="reflection" type="markdown" required="false" />
+      </output_contract>
+    </role>
+
+    <!-- 2.2 ARCHITECT -->
+    <role id="architect" model_tier="large-context" write_access="artifact-only">
+      <mission>Produce a complete, structured design dossier and a dependency-ordered task plan.</mission>
+      <allowed_tools>
+        <tool>read.repository</tool>
+        <tool>read.design-artifacts</tool>
+        <tool>write.design-artifacts</tool>
+      </allowed_tools>
+      <forbidden_tools>
+        <tool>file.write.source</tool>
+        <tool>git.commit</tool>
+      </forbidden_tools>
+      <instructions>
+        <critical_constraint id="A-C1">
+          The Architect MUST produce three artifacts:
+          <artifact_ref>ARCHITECTURE.md</artifact_ref>,
+          <artifact_ref>requirements.json</artifact_ref>, and
+          <artifact_ref>file_tree.json</artifact_ref>.
+          Markdown carries rationale; JSON carries machine-parseable structure.
+        </critical_constraint>
+        <critical_constraint id="A-C2">
+          Every task in the plan MUST declare:
+          goal, acceptance_criteria, constraints, context_refs,
+          output_format, dependencies, and estimated_blast_radius.
+        </critical_constraint>
+      </instructions>
+      <output_contract>
+        <artifact format="markdown" path="docs/ARCHITECTURE.md" required="true">
+          <purpose>Human-readable design rationale, trade-offs, and module boundaries.</purpose>
+        </artifact>
+        <artifact format="json" path="artifacts/requirements.json" required="true">
+          <purpose>MoSCoW-prioritized requirements with stable IDs.</purpose>
+        </artifact>
+        <artifact format="json" path="artifacts/file_tree.json" required="true">
+          <purpose>Planned file paths, modes, and change notes for coders.</purpose>
+        </artifact>
+        <artifact format="json" path="artifacts/task-plan.json" required="true">
+          <purpose>Dependency-ordered task graph conforming to task-plan.schema.json.</purpose>
+        </artifact>
+      </output_contract>
+    </role>
+
+    <!-- 2.3 CODER -->
+    <role id="coder" model_tier="small-context" multiplicity="1..N" write_access="worktree-scoped">
+      <mission>Implement exactly one delegated task inside an isolated worktree and return a typed result.</mission>
+      <allowed_tools>
+        <tool>file.read</tool>
+        <tool>file.write</tool>
+        <tool>file.edit</tool>
+        <tool>shell.exec</tool>
+        <tool>test.run</tool>
+        <tool>git.commit</tool>
+      </allowed_tools>
+      <isolation>
+        <mechanism>git-worktree</mechanism>
+        <branch_pattern>orchestrator/&lt;owner&gt;__&lt;task-id&gt;</branch_pattern>
+        <invariant>Never touch the main checkout or another task's worktree.</invariant>
+        <on_failure>discard_worktree_and_branch; retry begins clean</on_failure>
+      </isolation>
+      <instructions>
+        <critical_constraint id="C-C1">
+          The Coder MUST treat the handoff envelope as the single source of
+          truth. It MUST NOT infer additional scope from free-form prose.
+        </critical_constraint>
+        <critical_constraint id="C-C2">
+          Before editing, the Coder MUST validate that every required field
+          in the envelope is present. Missing fields return HANDOFF_INCOMPLETE
+          immediately.
+        </critical_constraint>
+        <critical_constraint id="C-C3">
+          The Coder MUST return both a human-readable summary and a
+          machine-readable result block fenced by RESULT_START / RESULT_END.
+        </critical_constraint>
+      </instructions>
+      <output_contract>
+        <field name="status" type="enum" values="completed,failed,blocked" required="true" />
+        <field name="files_changed" type="array&lt;string&gt;" required="true" />
+        <field name="tests_passed" type="boolean" required="true" />
+        <field name="summary" type="markdown" required="true" />
+        <field name="diff_digest" type="string" required="true" />
+      </output_contract>
+    </role>
+
+    <!-- 2.4 VERIFIER -->
+    <role id="verifier" model_tier="large-context" write_access="none">
+      <mission>Independently validate implementation results against acceptance criteria and return a typed verdict.</mission>
+      <allowed_tools>
+        <tool>diff.read</tool>
+        <tool>test.run</tool>
+        <tool>artifact.read</tool>
+      </allowed_tools>
+      <forbidden_tools>
+        <tool>file.write</tool>
+        <tool>git.commit</tool>
+      </forbidden_tools>
+      <instructions>
+        <critical_constraint id="V-C1">
+          The Verifier MUST evaluate only evidence: diff, test output, and
+          acceptance criteria. It MUST NOT rely on the Coder's summary alone.
+        </critical_constraint>
+        <critical_constraint id="V-C2">
+          A rejection MUST include actionable feedback items, each with
+          severity, file, and fix_hint.
+        </critical_constraint>
+        <critical_constraint id="V-C3">
+          Rejection cycles are capped at 3. After the cap, the task escalates
+          to the Orchestrator with status retry_cap.
+        </critical_constraint>
+      </instructions>
+      <output_contract>
+        <field name="verdict" type="enum" values="PASS,FAIL,ESCALATE" required="true" />
+        <field name="feedback" type="array&lt;feedback-item&gt;" required="false" />
+      </output_contract>
+    </role>
+
+  </roles>
+
+  <!-- ============================================================
+       3. HANDOFF CONTRACTS
+       ============================================================ -->
+  <handoff-contracts>
+    <description>
+      Every inter-agent message uses a typed envelope. The envelope is the
+      contract; free-form prose is carried as an untrusted payload and never
+      drives routing decisions.
+    </description>
+
+    <!-- 3.1 CANONICAL ENVELOPE -->
+    <schema id="handoff-envelope.schema.json" version="1.0.0">
+      <required_fields>
+        <field name="handoff_id"        type="string" format="uuid" />
+        <field name="parent_run_id"     type="string" />
+        <field name="task_id"           type="string" />
+        <field name="from_agent"        type="string" />
+        <field name="to_agent"          type="string" />
+        <field name="worker_role"       type="string" />
+        <field name="objective"         type="string" />
+        <field name="acceptance_criteria" type="array&lt;criterion&gt;" />
+        <field name="constraints"       type="array&lt;constraint&gt;" />
+        <field name="context_refs"      type="array&lt;artifact-ref&gt;" />
+        <field name="allowed_tools"     type="array&lt;string&gt;" />
+        <field name="result_schema"     type="string" />
+        <field name="budget"            type="object" />
+        <field name="deadline"          type="string" format="date-time" />
+        <field name="authority_digest"  type="string" format="sha256" />
+      </required_fields>
+      <optional_fields>
+        <field name="dependencies"      type="array&lt;string&gt;" />
+        <field name="human_summary"     type="markdown" />
+      </optional_fields>
+      <invariants>
+        <invariant>child.allowed_tools ⊆ parent.allowed_tools ∩ worker_role.allowed_tools</invariant>
+        <invariant>sum(child.budget) ≤ parent.budget</invariant>
+        <invariant>handoff_id + nonce are single-use; replay returns already_claimed</invariant>
+      </invariants>
+    </schema>
+
+    <!-- 3.2 TASK DELEGATION EXAMPLE -->
+    <example schema="handoff-envelope.schema.json" scenario="architect-to-coder">
+      <handoff_id>9f1c2a7e-4b3d-4e8a-9c1f-2d6e8b0a3c5f</handoff_id>
+      <parent_run_id>run-2026-10-30-001</parent_run_id>
+      <task_id>FEAT-003</task_id>
+      <from_agent>architect</from_agent>
+      <to_agent>coder-02</to_agent>
+      <worker_role>coder</worker_role>
+      <objective>
+        Implement the JWT refresh endpoint in src/auth/refresh.ts
+        according to the interface contract in artifacts/requirements.json.
+      </objective>
+      <acceptance_criteria>
+        <criterion id="AC-1">Endpoint returns 200 with a new access token for a valid refresh token.</criterion>
+        <criterion id="AC-2">Expired or revoked refresh tokens return 401 with code TOKEN_INVALID.</criterion>
+        <criterion id="AC-3">Unit tests cover both success and failure paths; coverage ≥ 90% for the new module.</criterion>
+      </acceptance_criteria>
+      <constraints>
+        <constraint>Do not modify the public API of src/auth/index.ts.</constraint>
+        <constraint>Use the existing TokenStore interface; do not introduce a new dependency.</constraint>
+      </constraints>
+      <context_refs>
+        <artifact-ref path="artifacts/requirements.json" section="auth.refresh" />
+        <artifact-ref path="docs/ARCHITECTURE.md" section="Token-Lifecycle" />
+      </context_refs>
+      <allowed_tools>file.read,file.write,file.edit,shell.exec,test.run,git.commit</allowed_tools>
+      <result_schema>coder-result@1.0.0</result_schema>
+      <budget>
+        <steps>20</steps>
+        <time_ms>300000</time_ms>
+        <cost_usd>0.40</cost_usd>
+      </budget>
+      <deadline>2026-10-30T18:00:00Z</deadline>
+      <authority_digest>sha256:ab12…</authority_digest>
+    </example>
+
+    <!-- 3.3 RESULT ENVELOPE -->
+    <schema id="coder-result.schema.json" version="1.0.0">
+      <required_fields>
+        <field name="handoff_id"      type="string" />
+        <field name="status"         type="enum" values="completed,failed,blocked" />
+        <field name="files_changed"  type="array&lt;string&gt;" />
+        <field name="tests_passed"   type="boolean" />
+        <field name="diff_digest"    type="string" format="sha256" />
+        <field name="terminal_reason" type="string" />
+      </required_fields>
+    </schema>
+  </handoff-contracts>
+
+  <!-- ============================================================
+       4. TASK STATE MACHINE
+       ============================================================ -->
+  <state-machine id="task-lifecycle">
+    <states>
+      <state name="pending"      terminal="false" />
+      <state name="in_progress"  terminal="false" />
+      <state name="blocked"      terminal="false" />
+      <state name="completed"    terminal="true" />
+      <state name="failed"       terminal="true" />
+      <state name="rejected"     terminal="false" />
+      <state name="retry_cap"    terminal="true" />
+    </states>
+    <transitions>
+      <transition from="pending"     to="in_progress" trigger="agent_claim" />
+      <transition from="pending"     to="blocked"     trigger="dependency_unmet" />
+      <transition from="blocked"     to="pending"     trigger="dependency_completed" />
+      <transition from="in_progress" to="completed"   trigger="result_validated" />
+      <transition from="in_progress" to="failed"      trigger="result_invalid_or_budget_exceeded" />
+      <transition from="in_progress" to="rejected"    trigger="verifier_fail" />
+      <transition from="rejected"    to="pending"     trigger="feedback_applied" />
+      <transition from="rejected"    to="retry_cap"   trigger="rejection_cycle_limit_reached" />
+    </transitions>
+    <guards>
+      <guard transition="pending→in_progress">
+        Handoff envelope MUST validate against handoff-envelope.schema.json.
+      </guard>
+      <guard transition="in_progress→completed">
+        Verifier verdict MUST be PASS and diff_digest MUST match the published commit.
+      </guard>
+      <guard transition="in_progress→rejected">
+        Verifier feedback MUST contain at least one feedback-item.
+      </guard>
+    </guards>
+    <retry_policy>
+      <max_rejections_per_task>3</max_rejections_per_task>
+      <backoff>exponential, base 2s, cap 60s</backoff>
+      <on_exhaustion>park_as_retry_cap; require_human_or_orchestrator_continue</on_exhaustion>
+    </retry_policy>
+  </state-machine>
+
+  <!-- ============================================================
+       5. ARTIFACT FORMATS BY PURPOSE
+       ============================================================ -->
+  <artifact-formats>
+    <format extension=".yaml" purpose="pipeline-configuration">
+      <usage>Roles, model tiers, tool allowlists, routing rules, retry thresholds.</usage>
+      <example>
+        <code language="yaml">
+roles:
+  coder:
+    model: small-context
+    tools: [file.read, file.write, file.edit, shell.exec, test.run]
+    accepts: [implementation, bug_fix, revision]
+    routes_to: [verifier]
+    max_instances: 3
+        </code>
+      </example>
+    </format>
+
+    <format extension=".md" purpose="human-readable-rationale">
+      <usage>ARCHITECTURE.md, design decision records, rejection feedback, final summaries.</usage>
+      <why>Markdown is the native reasoning format of LLMs and the lingua franca of engineering documentation.</why>
+    </format>
+
+    <format extension=".json" purpose="machine-parseable-handoff-and-state">
+      <usage>Handoff envelopes, task plans, requirements, results, ledger snapshots.</usage>
+      <rule>Every JSON artifact MUST declare its schema version and validate on write and read.</rule>
+    </format>
+
+    <format extension=".xml" purpose="agent-system-prompts">
+      <usage>Role definitions, constraints, output contracts, few-shot examples.</usage>
+      <rule>Use consistent, descriptive tags; nest for hierarchy; keep prose inside the smallest applicable tag.</rule>
+    </format>
+  </artifact-formats>
+
+  <!-- ============================================================
+       6. SAFETY & ISOLATION
+       ============================================================ -->
+  <safety>
+    <isolation>
+      <mechanism name="git-worktree-per-task">
+        <path>&lt;WORKTREES_DIR&gt;/&lt;owner&gt;__&lt;task-id&gt;</path>
+        <branch>orchestrator/&lt;owner&gt;__&lt;task-id&gt;</branch>
+        <invariant>Main checkout is never mutated directly.</invariant>
+        <cleanup>On failure, discard worktree and branch; retry begins from a clean base.</cleanup>
+      </mechanism>
+    </isolation>
+    <authority>
+      <invariant id="S-A1">Orchestrator and Verifier are read-only with respect to source files.</invariant>
+      <invariant id="S-A2">Coder authority is scoped to the allocated worktree and the allowed_tools list.</invariant>
+      <invariant id="S-A3">A child handoff cannot carry broader tool access than its parent envelope.</invariant>
+    </authority>
+    <budget>
+      <invariant id="S-B1">Every handoff declares step, time, and cost budgets.</invariant>
+      <invariant id="S-B2">The sum of sibling reservations cannot exceed the parent budget.</invariant>
+    </budget>
+    <replay_protection>
+      <invariant id="S-R1">handoff_id and nonce are single-use; replay returns already_claimed without re-execution.</invariant>
+      <invariant id="S-R2">Coder results are idempotent by task_id; duplicate completion is a no-op.</invariant>
+    </replay_protection>
+  </safety>
+
+  <!-- ============================================================
+       7. OBSERVABILITY & QUALITY GATES
+       ============================================================ -->
+  <observability>
+    <ledger>
+      <entry type="task_created"    fields="task_id, role, priority, dependencies" />
+      <entry type="task_claimed"    fields="task_id, agent_id, worktree_path, timestamp" />
+      <entry type="task_completed"  fields="task_id, verdict, diff_digest, duration_ms, cost_usd" />
+      <entry type="task_rejected"   fields="task_id, feedback_count, cycle_number" />
+      <entry type="reflection"      fields="run_id, stall_count, revised_plan_summary" />
+    </ledger>
+    <metrics>
+      <metric name="task_success_rate" />
+      <metric name="mean_rejection_cycles_per_task" />
+      <metric name="stall_counter_activations_per_run" />
+      <metric name="cost_per_completed_task" />
+      <metric name="handoff_schema_validation_failure_rate" />
+      <metric name="verifier_agreement_with_human_spot_check" />
+    </metrics>
+    <quality_gates>
+      <gate name="pre_dispatch">
+        Handoff envelope validates; required fields present; budget > 0.
+      </gate>
+      <gate name="pre_merge">
+        Verifier verdict = PASS; tests_passed = true; diff_digest matches published commit.
+      </gate>
+      <gate name="pre_completion">
+        All downstream dependencies are terminal; no unresolved retry_cap tasks.
+      </gate>
+    </quality_gates>
+  </observability>
+
+  <!-- ============================================================
+       8. CONFIGURATION TEMPLATE (YAML)
+       ============================================================ -->
+  <configuration-template>
+    <code language="yaml">
+pipeline:
+  name: architect-coder-orchestration
+  max_wall_clock_minutes: 120
+  stall_threshold: 2
+  reflection_max_iterations: 3
+
+roles:
+  orchestrator:
+    model: large-context
+    write_access: none
+    allowed_tools: [task-board.*, ledger.write, envelope.validate, worktree.allocate]
+  architect:
+    model: large-context
+    write_access: artifact-only
+    allowed_tools: [read.repository, read.design-artifacts, write.design-artifacts]
+  coder:
+    model: small-context
+    multiplicity: 3
+    write_access: worktree-scoped
+    allowed_tools: [file.*, shell.exec, test.run, git.commit]
+  verifier:
+    model: large-context
+    write_access: none
+    allowed_tools: [diff.read, test.run, artifact.read]
+
+guardrails:
+  max_task_depth: 10
+  max_tasks_per_group: 50
+  max_rejections_per_task: 3
+  max_added_lines_per_attempt: 500
+
+schemas:
+  handoff: schemas/handoff-envelope.schema.json
+  task_plan: schemas/task-plan.schema.json
+  coder_result: schemas/coder-result.schema.json
+    </code>
+  </configuration-template>
+
+  <!-- ============================================================
+       9. OPEN EXTENSION POINTS
+       ============================================================ -->
+  <extension-points>
+    <extension name="additional-specialist-roles">
+      Insert new roles between architect and coder (e.g., security-reviewer,
+      migration-specialist). The role must declare accepts, routes_to,
+      allowed_tools, and a result schema.
+    </extension>
+    <extension name="provider-abstraction">
+      The YAML configuration can swap the model provider for any role
+      without changing the orchestration graph or handoff contracts.
+    </extension>
+    <extension name="human-in-the-loop">
+      Any state can transition to awaiting_human via the Orchestrator.
+      A human approval produces a typed approval envelope that satisfies
+      the pre_merge gate.
+    </extension>
+  </extension-points>
+
+</pipeline-specification>

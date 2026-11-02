@@ -142,42 +142,66 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
 
       {/* Phase Navigation Tabs */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-white">5 Master Implementation Phases</h2>
-          <span className="text-xs text-slate-400">Click a phase to inspect milestones and deliverables</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <span>10 Master Delivery Phases (P1–P10)</span>
+              <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">S1, S2, S3 Complete · S4 Active</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">Select a phase to inspect deliverables, verification criteria, and testable invariants</p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
           {IMPLEMENTATION_PHASES.map((phase) => {
             const isSelected = phase.id === selectedPhaseId;
-            const phaseSteps = steps.filter((s) => s.phaseId === phase.id);
-            const phaseDone = phaseSteps.filter((s) => s.status === 'completed').length;
-            const phasePct = Math.round((phaseDone / phaseSteps.length) * 100) || 0;
+            const statusColor =
+              phase.status === 'completed'
+                ? 'border-emerald-500/40 bg-emerald-950/20 text-emerald-400'
+                : phase.status === 'in_progress'
+                ? 'border-amber-500/40 bg-amber-950/20 text-amber-400'
+                : 'border-slate-800 text-slate-500';
+
+            const planeBadgeColor =
+              phase.plane === 'kernel'
+                ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                : phase.plane === 'evolution'
+                ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                : phase.plane === 'plugin'
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                : phase.plane === 'client'
+                ? 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+                : 'bg-amber-500/20 text-amber-300 border-amber-500/30';
 
             return (
               <button
                 key={phase.id}
                 onClick={() => setSelectedPhaseId(phase.id)}
-                className={`text-left p-4 rounded-lg border transition-all cursor-pointer ${
+                className={`text-left p-3.5 rounded-lg border transition-all cursor-pointer relative overflow-hidden ${
                   isSelected
                     ? 'bg-slate-900 border-indigo-500 ring-1 ring-indigo-500/30'
                     : 'bg-slate-950 border-slate-800 hover:border-slate-700 hover:bg-slate-900/50'
                 }`}
               >
                 <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
-                  <span className="font-semibold">{phase.name}</span>
-                  <span className="tabular-nums font-mono text-[11px]">{phase.estimatedWeeks}</span>
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <span>{phase.code}</span>
+                    <span className={`text-[10px] px-1 py-0.2 rounded border font-mono uppercase ${planeBadgeColor}`}>
+                      [{phase.plane[0].toUpperCase()}]
+                    </span>
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase font-mono font-semibold ${statusColor}`}>
+                    {phase.status}
+                  </span>
                 </div>
-                <div className="text-sm font-bold text-slate-100 line-clamp-1">{phase.title}</div>
-                <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-                  <span>{phaseDone}/{phaseSteps.length} tasks</span>
-                  <span className="tabular-nums font-medium text-slate-400">{phasePct}%</span>
-                </div>
-                <div className="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden">
-                  <div
-                    className="bg-indigo-500 h-full transition-all duration-300"
-                    style={{ width: `${phasePct}%` }}
-                  />
+                <div className="text-xs font-semibold text-slate-200 line-clamp-1">{phase.title}</div>
+                {phase.salvageTag && (
+                  <div className="text-[10px] text-amber-400 font-mono mt-1 truncate">
+                    {phase.salvageTag}
+                  </div>
+                )}
+                <div className="mt-2 text-[11px] text-slate-500 font-mono">
+                  {phase.estimatedWeeks}
                 </div>
               </button>
             );

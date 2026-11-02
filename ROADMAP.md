@@ -1,133 +1,192 @@
-# Enterprise Agentic LLM Platform Workbench: Specialized Standalone UI & Engine Roadmap
+# Roadmap — Apex Agent Management Chat
 
-An architectural blueprint and engineering roadmap establishing a **standalone, secure TypeScript Agentic Workbench UI** (`modules/ui-agentic-workbench`). The interface translates the layout and ergonomics of the Perchance chat system into an enterprise agentic workbench, linking directly to the **Lean Java Agentic Core (LJAC)** execution engine and the **AgentForge H-MAP** multi-agent governance platform.
+Ten phases. Each ships with its full test suite (JUnit 5 + Testcontainers on the Java side, Vitest on the TypeScript side). A phase is "done" only when its exit criteria are green in CI.
 
----
-
-## 1. Domain Concept Mapping: Perchance → Enterprise Agentic Workbench
-
-| Reference UI Affordance | Specialized Agentic Translation | Underlying Mechanism & Formal Invariant |
-| :--- | :--- | :--- |
-| **`💬 New Chat / Character`** | **`+ New Session / Spawn Subagent`** | Dispatches a new session bound to an AgentForge `TaskContract` or launches a specialized subagent from the agent catalog. |
-| **Thread List & Avatars** | **Active Subagent Tasks & Sessions** | Displays active execution sessions with agent avatar/icon, assigned model, turn counter, contract status (`PENDING`, `RUNNING`, `COMPLETED`), and delete/rename actions. |
-| **"Chloe" (Default Character)** | **Built-in Gemini Platform Architect** | Default platform assistant (`gemini-3.8-flash` with Google Search or `gemini-4-argon` with High Thinking) providing zero-dep Java 21, AgentForge, and architectural guidance. |
-| **Additional Characters** | **Specialized AgentForge Subagents** | Configurable subagents: Lead Architect, AST Slicer, Rule DAG Auditor, and Code Engineer. Each possesses a charter, tool allowlist, and sandboxed directory (`.agent/workspaces/agents/<id>/`). |
-| **`✏️ Edit Character`** | **`⚙️ Configure Agent Specification`** | Modal to edit: Agent Title, Assigned Model ID, System Charter / Persona Prompt, Active Rule Protocols (`AGENTS.md`), Tool Allowlist, and execution timeouts. |
-| **`🏷️ Set Ur Name/Pic`** | **`👤 Operator Profile & Workspace`** | Configures Operator handle (e.g. "Lead Engineer"), authorization level, and active workspace root path. |
-| **Inline Actions (`✏️`, `🗑️`, `🔁`)** | **Turn Rewind, Edit & Tool Re-run** | `✏️` In-place prompt refinement; `🗑️` Prune turn from conversation history; `🔁` Re-trigger inference stream or re-execute agent tool call. |
-| **Perspective Selector** | **Stream Role & Injection Selector** | `🤖 Active Agent` (direct prompt), `👤 Operator` (human feedback), `⚙️ System Kernel` (system invariant injection), `📁 Workspace Link` (file/directory snippet link). |
-| **Bottom Utility Bar** | **Platform Governance Toolbar** | `⚙️ Provider Settings` (Cloud models, API keys, Ollama), `💾 Export Session` (complete JSON backup), `📁 Import Session`, `🗑️ Clear Sessions`. |
+Tags:
+- `[SALVAGE: LeanJavallm]` — component adapted from `LeanJavallm` source
+- `[SALVAGE: Agenticplatformsetup]` — pattern retained (no code reused)
+- `[K]` kernel plane · `[E]` evolution plane · `[P]` plugin host · `[A]` OS automation · `[C]` client
 
 ---
 
-## 2. User Experience & Visual Design
+## P1 — Kernel Domain Records & Context Threading `[K]`
+**Goal:** Compile-time-typed foundation with no runtime mutation surface.
 
-Following the SaaS & Dashboard design guidelines (`references/3_saas_dashboard.md`), the interface adopts a focused, high-contrast, dark-mode developer workbench aesthetic.
+**Deliverables**
+- `TenantId`, `SessionId`, `CommitId`, `BlobId`, `PermissionGrant` records
+- `AgentStreamEvent` sealed hierarchy (9 permitted subtypes)
+- `DomainMessage` sealed hierarchy (4 permitted subtypes)
+- `ExecutionContext` record + HTTP filter that threads it explicitly (replaces invalid `ScopedValue` claims)
+- `CancellationToken` primitive `[SALVAGE: LeanJavallm]` — atomic-flag cooperative cancellation, used by P6/P7 streams and P4 tools
 
-### Aesthetic Direction & Visual Tokens
-- **Canvas Atmosphere**: Deep slate background (`#0b0f17` / `bg-slate-950`) providing high contrast and minimal eye strain during extended coding sessions.
-- **Structural Surfaces**: Single-elevation dark panels (`#131b2e` / `bg-slate-900/80`) bounded by clean hairline borders (`border-slate-800`). Zero nested cards within cards.
-- **60-30-10 Color Budget**:
-  - `60% Neutral Canvas`: `#0b0f17` deep slate field.
-  - `30% Structural Panels`: `#131b2e` sidebar, top header, and message bubbles.
-  - `10% Accent Points`: Electric Indigo (`#6366f1` / `indigo-500`) for primary actions (`Send`, `Spawn Agent`), Emerald (`#10b981` / `emerald-500`) for active engine status, and Amber (`#f59e0b` / `amber-500`) for system invariants.
-- **Typography**: Clean display sans (`Plus Jakarta Sans` / `Outfit`) for headers and navigation, paired with `Public Sans` for message prose. Monospace figures (`JetBrains Mono`, `tabular-nums`) are enforced across turn counts, timestamps, and tool argument payloads.
-
----
-
-## 3. Standalone Architecture & Module Isolation
-
-The frontend is architected as an isolated TypeScript module located at `modules/ui-agentic-workbench/` (or `src/workbench/`), decoupled from the Java runtime.
-
-### Component Layout & Hierarchy
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        STANDALONE WORKBENCH UI (TypeScript)                            │
-├──────────────────────────────────┬─────────────────────────────────────────────────────┤
-│   AgentThreadSidebar.tsx (280px) │   AgentArena.tsx (Flex 1)                           │
-│   ├── [New Session / Spawn Agent]│   ├── ArenaTopBar.tsx                               │
-│   ├── SessionList.tsx            │   │   ├── [⚙️ Configure Agent Spec]                 │
-│   │   └── AgentSessionCard.tsx   │   │   ├── [👤 Operator Profile]                     │
-│   ├── StorageNotice.tsx          │   │   └── [Engine Status: Java 21 Zero-Dep]         │
-│   └── PlatformControlBar.tsx     │   ├── AgentMessageStream.tsx                        │
-│       ├── SettingsModalTrigger   │   │   ├── AgentMessageBubble.tsx                    │
-│       ├── ExportJsonButton       │   │   │   ├── InlineEditForm.tsx                    │
-│       ├── ImportJsonButton       │   │   │   └── ToolExecutionBadge.tsx                │
-│       └── ClearSessionsButton    │   │   └── StreamingCursor.tsx                       │
-│                                  │   └── AgentInputDeck.tsx                            │
-│                                  │       ├── StreamRoleSelector.tsx                    │
-│                                  │       │   ├── [🤖 Active Agent]                     │
-│                                  │       │   ├── [👤 Operator]                         │
-│                                  │       │   ├── [⚙️ System Kernel]                    │
-│                                  │       │   └── [📁 Workspace Link]                   │
-│                                  │       ├── PromptTextArea.tsx                        │
-│                                  │       ├── SendButton.tsx                            │
-│                                  │       └── OptionsDrawer.tsx (Temp / Max Tokens)     │
-└──────────────────────────────────┴─────────────────────────────────────────────────────┘
-```
+**Exit criteria**
+- `./mvnw test` green
+- 100% branch coverage on record compact constructors
+- Property test: mutating any record's input collection throws at construction
+- `CancellationToken` cancellation is observed within 100ms by an awaiting `CompletableFuture`
 
 ---
 
-## 4. Technical Architecture: System Flow & Boundary Separation
+## P2 — CAS Engine `[E]`
+**Goal:** Content-addressed storage with no concurrent-corruption path.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│             STANDALONE FRONTEND: modules/ui-agentic-workbench          │
-│   • Local-First React Store (`workbenchStorage.ts`)                    │
-│   • Multi-role Prompt Deck & Perspective Selector                      │
-│   • Zero compile-time coupling to backend classes                      │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   │ HTTP REST & SSE Stream (/api/agent/stream)
-                                   ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   EXPRESS / TYPESCRIPT PROXY (server.ts)               │
-│   • Route Dispatcher: /api/agent/stream, /api/agent/contracts          │
-│   • Secure Secret Handshake (Zero-Fill Memory Buffer)                  │
-│   • LLM Providers: Gemini 3.8 Flash, Gemini 4 Argon, Local Ollama      │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   │ IPC / Stdio Process Bridge (No Jackson/Gson)
-                                   ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│               LEAN JAVA AGENTIC CORE (Java 21 LTS - java.base)         │
-├──────────────────────────────────┬─────────────────────────────────────┤
-│   com.leanllm.core               │   com.leanllm.agentforge            │
-│   ├── SecureSecret (Wipe char[]) │   ├── TaskContract.java (Record)    │
-│   ├── ProcessTreeTerminator      │   ├── ExecutionArtifact.java        │
-│   ├── JsonNode & JsonParser      │   ├── McpPathPolicyFilter (Jail)    │
-│   ├── ContextCompactor (Sliding) │   ├── RuleDagEngine (AGENTS.md)     │
-│   └── AbstractProcessRunner      │   └── TypeScriptTaskRunner (Loom)   │
-└──────────────────────────────────┴─────────────────────────────────────┘
-```
+**Deliverables**
+- Postgres adapter (`WorkspaceStoragePort`)
+- SQLite adapter (SBC profile; WAL + single-writer + optimistic CAS)
+- Flyway migrations for `workspace_blob`, `workspace_tree`, `workspace_commit`, `workspace_branch`
+
+**Exit criteria**
+- `CasConcurrencyIT`: 16 virtual threads × 4 branches, zero corruption
+- `WorkspaceBlob` insert is idempotent (SHA-256 dedupe proven)
+- Branch pointer update loses no writes under contention
+- `PRAGMA integrity_check` passes after SQLite stress test
 
 ---
 
-## 5. Phased Implementation Roadmap
+## P3 — Workspace Materialization `[E]→[K]`
+**Goal:** Tree → immutable `CompiledAgentWorkspace` + `AgentProfileView`.
 
-### Phase 1: Standalone TypeScript Workbench UI (`modules/ui-agentic-workbench/` & `src/workbench/`)
-- Build `AgentThreadSidebar.tsx`: New session / spawn agent button, session cards, storage disclaimer, and bottom utility toolbar.
-- Build `AgentArena.tsx` & `ArenaTopBar.tsx`: Agent specification modal trigger, operator profile modal trigger, and live engine status indicator.
-- Build `AgentMessageStream.tsx`: Turn bubbles with avatar, Markdown rendering, syntax highlighting, tool execution cards, and inline edit/delete/re-run actions.
-- Build `AgentInputDeck.tsx`: 4-role perspective selector (`🤖 Agent`, `👤 Operator`, `⚙️ System Kernel`, `📁 Workspace Link`), auto-resizing prompt textarea, `Send` button, and options drawer.
-- Build `workbenchStorage.ts`: Local-first `localStorage` persistence with complete JSON backup export and import.
+**Deliverables**
+- `WorkspaceMaterializer` parsing `SKILL.md`, `tools/**/*.json`, `config/mcp-servers.json`, `meta/agent-profile.json`
+- `IMMUTABLE_KERNEL_INVARIANTS` compiled constant merged at materialization
+- `AgentProfileView` as the *single* wire DTO between TS and Java
 
-### Phase 2: Express Backend Stream Endpoints (`server.ts`)
-- Implement `/api/agent/stream` supporting streaming SSE for Gemini 3.8 Flash, Gemini 4 Argon, and local Ollama.
-- Implement `/api/agent/contracts` to link AgentForge `TaskContract` creation with active session turns.
+**Exit criteria**
+- Round-trip test: commit → materialize → profile view → OpenAPI → TS type
+- Materialized workspaces are deeply immutable (property test)
+- 60s cache by `CommitId` proven correct (no stale reads after branch move)
 
-### Phase 3: Core Java 21 Zero-Dependency Foundation (`java/`)
-- Implement RFC 8259 compliant `JsonNode.java` and `JsonParser.java` under `com.leanllm.json`.
-- Implement `TaskContract.java` and `McpPathPolicyFilter.java` under `com.leanllm.agentforge`.
-- Implement standalone `JsonParserTest.java` running on standard OpenJDK 21 LTS without JUnit.
+---
 
-### Phase 4: Obsidian Documentation Graph (`docs/`)
-- Author `docs/ui/AgenticWorkbenchRoadmap.md` with in-depth logic explaining the Perchance-to-Agentic UI translation.
-- Document RFC 8259 compliance, CWE-674 recursion limits, and AgentForge integration hooks in `docs/json/ZeroDepJson.md`.
+## P4 — Sandboxed Process Executor `[P]`
+**Goal:** Command execution with no shell-injection surface and no orphan processes.
 
-### Phase 5: Verification & Git Commit
-- Run logic unit tests: `npx --yes tsx --test src/utils/*.test.ts`.
-- Run compiler (`compile_applet`) and TypeScript linter (`tsc --noEmit`).
-- Verify live browser interaction and visual appearance via Playwright CLI.
-- Commit all changes and push to `https://github.com/jcham2024-arch/LeanJavallm`.
+**Deliverables**
+- `SandboxedProcessExecutor` (tokenized `argv`, no `/bin/sh`)
+- **Realpath jail** for working directory `[SALVAGE: Agenticplatformsetup]` — resolve `toRealPath()`, assert `startsWith(workspaceRoot)`, reject deviation before `ProcessBuilder.start()`
+- **`ProcessTreeTerminator`** `[SALVAGE: LeanJavallm]` — on timeout or cancellation, walk `ProcessHandle.descendants()` and `destroyForcibly()` every descendant, not just direct child
+- Per-tenant binary allow-list
+- 30s default timeout, 50KB output cap
+
+**Exit criteria**
+- `ProcessInjectionIT`: `;`, `$()`, `` ` ``, `|`, `&&` reach target binary as literal argv bytes
+- `OrphanProcessIT`: tool spawning grandchild leaves zero surviving processes after timeout or cancellation
+- `PathTraversalIT`: `../` in argv or working directory rejected pre-exec
+- Output cap truncates without OOM at 50KB
+- Cancellation via `CancellationToken` terminates process tree within 500ms
+
+---
+
+## P5 — SandboxValidationSentinel `[E]`
+**Goal:** The safety keystone — six-category gate before any proposal.
+
+**Deliverables (per `docs/INVARIANTS.md` §Sentinel Categories)**
+1. Structural — schemas, no traversal
+2. Security — credential regex, injection markers
+3. Capability — every tool class covered by operator grant
+4. Dry-run — every new tool probes successfully
+5. Regression — replay last 20 messages, no new guardrail trips, ≤110% tokens
+6. Budget — system prompt ≤25% grant, ≤80% parent + 4K tokens; `SKILL.md` tiered limits (150/200 lines) `[SALVAGE: Agenticplatformsetup]`
+7. Monotonic Protection Inventory (E6) — candidate cannot drop active guardrail IDs without operator grant
+
+**Exit criteria**
+- 6 × parameterized test classes, each with passing and failing fixtures
+- Any failure rolls branch to parent and emits `SANDBOX_REJECTED:{CATEGORY}`
+- Capability-class escalation (`WRITE`, `NET_EGRESS`, `PROC_SPAWN`, `SCREEN_INJECT`) forces HITL regardless of sentinel outcome
+
+---
+
+## P6 — LangChain4j Orchestration + MCP `[K]×[P]`
+**Goal:** Working supervisor/specialist loop over SSE, with context overflow defense.
+
+**Deliverables**
+- `DynamicAgentFactory` building `SupervisorAgent` from `AgentProfileView`
+- `McpToolProvider` wiring (STDIO + Streamable HTTP) with descriptor allowlist validation (M1)
+- Supervisor meta-tools: `spawnAgent`, `delegateTask`, `writeWorkspaceFile`
+- `writeWorkspaceFile` is sandbox-branch-only (cannot touch `main`)
+- **`TokenEstimator`** `[SALVAGE: LeanJavallm]` — cheap heuristic token count
+- **`ContextCompactor`** `[SALVAGE: LeanJavallm]` — sliding-window pruning preserving SYSTEM message
+- ReAct loop structure informed by `AgentEngine` `[SALVAGE: LeanJavallm]`
+- Streaming tool-boundary monotonic sequence preservation (C6)
+
+**Exit criteria**
+- E2E: prompt → orchestrator spawns `@SecOps` → SecOps invokes stub tool → stream renders both messages
+- `writeWorkspaceFile` to `main` rejected by construction
+- `writeWorkspaceFile` to sandbox branch triggers §P5 sentinel
+- `ContextCompactor` preserves SYSTEM message and last N turns under forced-overflow fixture
+- `CancellationToken` cancellation mid-stream stops inference promptly
+
+---
+
+## P7 — TypeScript Client & SSE `[C]`
+**Goal:** Live streaming into the Perchance-style workspace.
+
+**Deliverables**
+- `AgentStreamClient` (`fetch` + `ReadableStream`, exponential backoff)
+- `AgentRoutingBar`, `AgentMessageCard`, `ReasoningAccordion`, `ToolInvocationBadge`
+- Zustand session store
+- `openapi-typescript` generation wired into CI
+
+**Exit criteria**
+- Types are isomorphic: CI `git diff --exit-code` on generated `.d.ts`
+- SSE reconnects after network drop without duplicating messages
+- `ERROR` events render gracefully (no UI crash)
+
+---
+
+## P8 — Tauri Packaging & HITL Approval `[C]`
+**Goal:** Native desktop shell + human sign-off on agent proposals.
+
+**Deliverables**
+- Tauri 2.11.1+ shell with CSP hardening (`script-src` excludes `data:` and `blob:`) (C5)
+- `GitDiffReviewModal` (2-way diff + embedded sentinel report)
+- `PermissionGrant` signing flow
+- Content sanitization for agent-authored tokens
+
+**Exit criteria**
+- App launches across Linux WebKitGTK / Windows WebView2 / macOS WKWebView
+- Proposal → diff → approve → merge → hot recompile works end-to-end
+- Reject → rollback leaves `main` untouched (verified by commit hash)
+
+---
+
+## P9 — SBC Profile & Accessibility `[A]`
+**Goal:** Raspberry Pi 400 + Kali deployment target.
+
+**Deliverables**
+- `sbc` Spring profile (SQLite, budget defaults)
+- AT-SPI2 `AccessibilityReader` (Linux)
+- `HostEcosystemDiscoveryService` (PATH + port probes)
+- Dead-man switch + input rate limit for injection guards
+
+**Exit criteria**
+- Platform runs on Pi 400, idle RSS 300–400MB
+- Accessibility tree of running Godot/Reaper window read as JSON
+- Dead-man switch defaults `false` and blocks injection when disarmed
+- Password fields (`role == "passwordField"`) never injected into
+
+---
+
+## P10 — Token Economics & Provider Fallback `[K]`
+**Goal:** Cost control, resilience, and memory routing.
+
+**Deliverables**
+- `ChatModelProvider` interface + `ModelRegistry`
+- `TokenMeter` (pre-inference gate + post-inference accounting) built on `TokenEstimator`
+- Fallback chain on `provider_5xx` / `provider_timeout` / `rate_limited`
+- Hybrid retrieval with `GraphStorePort` + `VectorStorePort` for multi-hop queries (M2)
+- SSE `BudgetWarning` (80%) and `BudgetExhausted` (100%)
+
+**Exit criteria**
+- Budget exhausted → stream terminates with `BudgetExhausted`
+- Provider 5xx → transparent fallback within same conversation
+- Per-tenant budget accounting survives restart (persisted in SQLite)
+
+---
+
+## Post-v1 (Deferred)
+- Multi-region LLM routing
+- Cross-tenant skill marketplace
+- TLA+ formal verification of the sentinel
+- Android deployment (Tauri 2.0 + AccessibilityService bridge)
+- Descending-order AST patch tooling `[SALVAGE: Agenticplatformsetup]`

@@ -1,82 +1,129 @@
-# Lean Java Agentic Core (LJAC)
+# Apex Agent Management Chat
 
-> **Java 21 LTS (strictly java.base module)** · **Zero external runtime dependencies. No third-party libraries permitted (no Jackson, no Gson, no Spring, no Apache Commons, no OkHttp).**
-
-A self-contained, enterprise-grade, ultra-lean agentic framework capable of running on any machine with a standard JVM. The system manages autonomous ReAct (Reason + Act) cycles, provides transparent local and cloud LLM inference, and delegates dynamic workloads to sandboxed external scripts without native JNI bindings or heavy embedded interpreters.
+> Enterprise-grade, self-evolving multi-agent platform. Java 21 microkernel + Content-Addressable Storage (CAS) evolution plane + Tauri 2.0 / React 19 universal client.
 
 ---
 
-## 🏛️ Polyglot Architecture
+## What this is
 
-- **Java 21 LTS Orchestration Core**: Zero external runtime dependencies (`java.base` module only). Manages ReAct cycles, thread-safe context compaction, HTTP/2 Server-Sent Events (SSE) streaming, credential scrubbing, and process supervision.
-- **TypeScript (Deno / Bun / ts-node)**: Primary guest scripting language for all dynamic agent tools, API adapters, and JSON data transformations.
-- **Python 3**: Auxiliary guest scripting language strictly for numerical mathematics, scientific computing, and ML inference.
-- **Subprocess Isolation**: Out-of-process execution managed directly via `ProcessBuilder` without intermediate shell wrappers (`no sh -c` or `cmd /c`).
+Apex is a **dual-plane agentic platform**:
 
----
+- **Kernel Plane** — an immutable, compile-time-typed Java 21 microkernel (Spring Boot 3.3, LangChain4j, Virtual Threads) that owns execution invariants, tenant isolation, guardrails, and the LLM reasoning loop. It has **no write path** to its own behavior.
+- **Evolution Plane** — a Content-Addressable Storage (CAS) Git-tree where all agent growth (prompts, skills, tool manifests, MCP configs) lives as versioned blobs on ephemeral sandbox branches. Changes are gated by an automated six-category validation sentinel and human sign-off before merging to `main`.
 
-## 🔒 5 Critical Remediated Architectural Gaps
-
-1. **Zombie Subprocess Elimination (`ProcessTreeTerminator`)**: Uses JDK 21 `ProcessHandle.descendants()` to recursively kill process trees, eliminating orphan child processes upon timeout or cancellation.
-2. **Context Window Overflow Defense (`TokenEstimator` & `ContextCompactor`)**: Heuristic character-to-token budgeting (~3.8 chars/token) with sliding-window compaction that preserves `SYSTEM` instructions at index 0.
-3. **Cooperative Cancellation (`CancellationToken`)**: Thread-safe `AtomicBoolean` signaling primitive for halting inference streams and script execution.
-4. **Ephemeral Script Lifecycle (`EphemeralScriptManager`)**: `AutoCloseable` temporary script manager guaranteeing disk cleanup upon context exit.
-5. **Zero OS Thread Overhead (`AbstractProcessRunner`)**: Uses Java 21 Virtual Threads (`Thread.ofVirtual().start()`) for non-blocking stream drainage without pipe deadlocks.
+The frontend is a **Tauri 2.0 + React 19** universal client with an interactive workspace cockpit, connected via typed SSE over a strictly isomorphic TypeScript/Java contract.
 
 ---
 
-## 📦 Codebase Structure
+## Why this design
 
+The central problem with autonomous AI agents is: *how do you let them improve themselves without letting them destroy the host?*
+
+Apex answers this by making "self-improvement" a first-class, versioned, sandboxed, human-auditable operation — the same discipline Git + CI/CD brought to software delivery.
+
+The distinguishing feature against prior attempts is **enforced isomorphism**: the TypeScript client cannot drift from the Java kernel because the CI build fails when generated types diverge (`docs/INVARIANTS.md` §C1).
+
+---
+
+## Architecture at a Glance
+
+### Dual-Plane Topology
 ```
-├── docs/                                 # Obsidian-flavored Markdown Documentation Graph
-│   ├── security/                         # Memory hygiene, environment sanitization, tree termination
-│   ├── json/                             # Zero-dependency JSON AST & recursive-descent parser
-│   ├── domain/                           # Canonical turns, tool schemas, token estimation
-│   ├── client/                           # HTTP/2 SSE transport, Cloud & Local SSRF loopback clients
-│   ├── scripting/                        # Polyglot Deno/Bun & Python process isolation
-│   ├── agent/                            # ReAct cognitive engine & script-delegating tools
-│   └── ui/                               # Decoupled UiBridge observer interface
-├── INDEX.md                              # Master knowledge graph index
-├── java/                                 # Zero-Dependency Java 21 Source Code
-│   └── src/main/java/com/leanllm/        # 26 atomic POJOs, Records & Interfaces (<120 LOC each)
-└── src/                                  # Interactive Executive Architecture & Roadmap Platform (React + Express)
-```
-
----
-
-## 💻 Building the Java Core
-
-Standard OpenJDK 21 LTS:
-
-```bash
-cd java
-javac -d bin --release 21 -Xlint:all src/main/java/com/leanllm/*/*.java
-```
-
----
-
-## 🚀 Running the Architecture & Roadmap Platform
-
-```bash
-npm install
-npm run dev
+       ┌────────────────────────────────────────────────────────┐
+       │               HUMAN OPERATOR / TAURI UI                │
+       └───────────────────────────┬────────────────────────────┘
+                                   │ Typed SSE / OpenAPI (C1)
+       ┌───────────────────────────▼────────────────────────────┐
+       │                      KERNEL PLANE                      │
+       │  Java 21 LTS · Virtual Threads (K8) · 9 Core Ports     │
+       │  · ChatModelPort         · PlannerPort (AStar)         │
+       │  · ToolExecutorPort      · ApprovalPort (L0-L5)        │
+       │  · StoragePort           · VectorStorePort             │
+       │  · SecretsPort           · AuditPort                   │
+       │  · TelemetryPort         · GraphStorePort (M2)         │
+       │  (Immutable: no runtime write path to own behavior)    │
+       └─────────────┬────────────────────────────▲─────────────┘
+                     │                            │
+      writeWorkspaceFile (Sandbox only)   ProposalCreated (Verified)
+                     │                            │
+       ┌─────────────▼────────────────────────────┴─────────────┐
+       │                    EVOLUTION PLANE                     │
+       │  · CAS Workspace Engine (Postgres / SQLite WAL)        │
+       │  · Content-addressed blobs, trees, commits, branches   │
+       │  · SandboxValidationSentinel (6 Categories: E1-E6)     │
+       │  · Protection Inventory Monotonicity (Masked Erosion)  │
+       └────────────────────────────────────────────────────────┘
 ```
 
-Visit `http://localhost:3000` to explore:
-- The 5-Phase Master Implementation Roadmap & Downstream Agent Tasks
-- 8 Subsystem Technical Architecture Deep-Dive
-- 26-POJO Code Inspector with Javadoc and code copy
-- Interactive Obsidian Knowledge Graph with clickable [[WikiLinks]]
-- Live Simulators (ReAct cognitive loop, SecureSecret memory wipe, ContextCompactor, EnvironmentSanitizer)
-- AI Architectural Consultant (Search Grounding via `gemini-3.8-flash` & High Thinking via `gemini-4-argon`)
+### Nine Core Ports
+Owned exclusively by `engine-core`:
+1. `ChatModelPort` — Streaming LLM completions and tool calls (OpenAI-compatible HTTP provider in `engine-llm-http`).
+2. `PlannerPort` — Deterministic Goal-Oriented Action Planning (`AStarPlanner` in `engine-planner`, ~660 LOC native).
+3. `ToolExecutorPort` — Sandboxed process and tool execution (`engine-tools-impl`).
+4. `ApprovalPort` — Human-In-The-Loop gate with typed `RiskLevel` (L0–L5).
+5. `StoragePort` — Step log and session persistence (`engine-store-sqlite`).
+6. `VectorStorePort` — Vector embeddings index for semantic retrieval.
+7. `SecretsPort` — Deterministic credential access and memory-safe scrubbing.
+8. `AuditPort` — Cryptographically chained execution trace log.
+9. `TelemetryPort` — Structured metrics and token budget accounting.
 
 ---
 
-## 🖥️ Modular Standalone UI: Enterprise Agentic LLM Workbench
+## Repository Layout
 
-Located at `modules/ui-agentic-workbench/` (or `src/workbench/`), this isolated TypeScript module specializes the layout and simplicity of Perchance-style character chat systems into an enterprise agentic workbench:
-- **Built-in Gemini Platform Architect**: The default platform assistant ("Chloe" equivalent) powered by Gemini with search grounding and reasoning.
-- **Specialized AgentForge Subagents**: Multi-agent task execution governed by `TaskContract` objects and progressive disclosure Rule DAGs (`AGENTS.md`).
-- **4-Stream Perspective Deck**: `🤖 Active Agent`, `👤 Operator`, `⚙️ System Kernel`, and `📁 Workspace Link` (replaces image generation with file/folder tree binding).
-- **Zero-Dependency Java Link**: Real-time communication via SSE and RFC 8259 JSON serialization without external libraries.
-- **Read Full Specification**: See [[docs/ui/AgenticWorkbenchRoadmap.md|Agentic Workbench Module & Roadmap]].
+```
+.
+├── pom.xml                          # Root Maven parent (packaging=pom)
+├── package.json                     # AI Studio React 19 + Vite + Express workbench
+├── server.ts                        # Server-side Gemini 3.8/4 architecture consultant
+├── apex-chat/                       # Layer 1 pure POJOs (zero I/O, zero external deps)
+│   └── apex-chat-common/            # TenantId, SessionId, CommitId, BlobId records
+├── apex-core/                       # Layer 2 core interfaces and engine implementations
+│   ├── engine-core/                 # 9 port interfaces, domain models, RiskLevel
+│   ├── engine-planner/              # AStarPlanner, PlanLoop, Action, Goal, Condition
+│   ├── engine-store/                # StoragePort interfaces
+│   └── engine-tools/                # Tool interfaces and contracts
+├── apex-platform/                   # Layer 2 security, multi-tenancy, audit (Tier 2)
+│   ├── apex-auth/                   # JWT & PermissionGrant verification
+│   ├── apex-tenant/                 # Row-Level Security (RLS)
+│   └── apex-audit/                  # Chained audit log
+├── engine-cli/                      # TaskRunner, YAML schema, CLI entrypoint
+├── engine-llm-http/                 # OpenAI-compatible streaming LLM provider
+├── engine-store-sqlite/             # SQLite step_log with WAL mode & session queries
+├── engine-tools-impl/               # RealPathJail, ProcessTreeTerminator, 5 kernel tools
+├── java/                            # LeanJavallm salvage reference implementations
+├── src/                             # AI Studio React 19 interactive developer workbench
+├── docs/
+│   ├── INVARIANTS.md                # 22 testable safety guarantees (K1-K8, E1-E6, M1-M2, C1-C6)
+│   ├── ROADMAP.md                   # 10-phase delivery plan (P1–P10)
+│   ├── STANDARDS.md                 # Java 21 & TypeScript 5.x standards
+│   ├── STRUCTURE.md                 # Maven module & Java package directory
+│   ├── PROJECT-STATUS.md            # Live phase progress & scope review
+│   ├── pipeline/                    # HCAT & Multi-agent pipeline XML specifications
+│   └── analysis/                    # 2026 Ecosystem Review & vulnerability mitigations
+└── .github/workflows/               # CI: type-drift, ArchUnit, jdeps, JUnit 5
+```
+
+---
+
+## Provenance & Salvage
+
+Apex consolidates and formalizes components from **`jcham2024-arch/LeanJavallm`**:
+
+- **`ProcessTreeTerminator`** → Descendant-walk kill using `ProcessHandle.descendants().destroyForcibly()` for sandboxed processes (Invariant K5).
+- **`ContextCompactor` + `TokenEstimator`** → Context-overflow defense preserving SYSTEM prompts at index 0 and sliding-window conversational pruning (Invariant C4).
+- **`CancellationToken`** → Atomic-flag cooperative cancellation primitive for SSE streams and tool execution (Invariant K6).
+- **`AgentEngine` loop structure** → Supervisor reasoning loop reference.
+
+Patterns retained from **`jcham2024-arch/Agenticplatformsetup`**:
+- **RealPathJail** → Canonical-path `toRealPath().startsWith(root)` path-traversal barrier (Invariant K4).
+- **Tiered `SKILL.md` line limits** → 150/200 line limits in the sentinel budget category.
+
+---
+
+## Status & Progress
+
+- **S1 (Platform Foundation)**: **Complete** (Root POM, `apex-chat-common`, ArchUnit purity gate, `jdeps` isolation).
+- **S2 (Kernel Self-Hosting)**: **Complete** (S2.0 skeletons, S2.1 nine ports, S2.2 AStarPlanner, S2.3 tools & realpath jail, S2.4 HTTP LLM provider, S2.5 SQLite store, S2.6 CLI task runner, S2.7 E2E test).
+- **S3.0 (Security & Platform Bootstrap)**: **In Progress** (`apex-platform` aggregator, `RiskLevel` L0-L5 typed approval requests).
+- **Phases S4–S10 / P4–P10**: Detailed in `docs/ROADMAP.md`.
